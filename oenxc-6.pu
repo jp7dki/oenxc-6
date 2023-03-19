@@ -1,0 +1,9 @@
+@startuml
+[*] --> PowerOn
+PowerOn --> Clock
+Clock --> TimeAdjust
+TimeAdjust --> DisplaySettings
+DisplaySettings --> Clock
+Clock --> RandomDisplay
+RandomDisplay --> Clock
+@enduml

@@ -102,28 +102,26 @@ static void timer_alarm0_irq(void) {
     if(flg_time_correct==false){
         rtc_get_datetime(&time);
 
-        disp_num[0] = time.hour/10;
-        disp_num[1] = time.hour%10;
-        disp_num[2] = time.min/10;
-        disp_num[3] = time.min%10;
-        disp_num[4] = time.sec/10;
-        disp_num[5] = time.sec%10;
+
+        disp_num[0] = time.sec%10;
+        disp_num[1] = time.sec/10;
+        disp_num[2] = time.min%10;
+        disp_num[3] = time.min/10;
+        disp_num[4] = time.hour%10;
+        disp_num[5] = time.hour/10;
 
         for(i=0;i<6;i++){
             uart_putc(UART_DEBUG,'0'+disp_num[i]);
         }
         uart_putc(UART_DEBUG, '\n');
         uart_putc(UART_DEBUG, '\r');
-        
-        gpio_put(PPSLED_PIN, 1);
-        sleep_ms(100);
-        gpio_put(PPSLED_PIN, 0);
     }
 
 }
 
 //---- timer_alarm1 : 10msごとの割り込み ----
 static void timer_alerm1_irq(void) {
+    uint8_t i;
     // Clear the irq
     hw_clear_bits(&timer_hw->intr, 1u << 1);
     uint64_t target = timer_hw->timerawl + 10000; // interval 40ms
@@ -136,6 +134,17 @@ static void timer_alerm1_irq(void) {
         }
     }
 
+/*
+    uint32_t result = adc_read();
+    uint8_t duty = result*100/3000;
+    if(duty > 100) duty=100;
+    if(duty <20) duty=20;
+    
+    for(i=0;i<6;i++){
+        disp_duty[i] = duty;
+    }
+*/
+    
 }
 
 //---- GPIO割り込み(1PPS) ----
@@ -145,12 +154,12 @@ void gpio_callback(){
 
     rtc_get_datetime(&time);
 
-    disp_num[0] = time.hour/10;
-    disp_num[1] = time.hour%10;
-    disp_num[2] = time.min/10;
-    disp_num[3] = time.min%10;
-    disp_num[4] = time.sec/10;
-    disp_num[5] = time.sec%10;
+    disp_num[0] = time.sec%10;
+    disp_num[1] = time.sec/10;
+    disp_num[2] = time.min%10;
+    disp_num[3] = time.min/10;
+    disp_num[4] = time.hour%10;
+    disp_num[5] = time.hour/10;        
 
     for(i=0;i<6;i++){
         uart_putc(UART_DEBUG,'0'+disp_num[i]);
