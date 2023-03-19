@@ -1,3 +1,14 @@
+//-------------------------------------------------------
+// main.c
+//-------------------------------------------------------
+// OENXC-6 (Okomeya-Electronics NiXie-tube Clock Mark.VI) main program
+// 
+// Written by jp7dki
+//-------------------------------------------------------
+
+//-------------------------------------------------------
+//- Header files include
+//-------------------------------------------------------
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "pico/stdlib.h"
@@ -31,7 +42,9 @@
 #define UART_GPS uart1
 #define BAUD_RATE_GPS 9600
 
-
+//-------------------------------------------------------
+//- Global Variable
+//-------------------------------------------------------
 const uint KR_PIN = 0;
 const uint KL_PIN = 1;
 const uint K9_PIN = 2;
@@ -66,6 +79,7 @@ const uint LSENSOR_PIN = 29;
 uint8_t count;
 
 uint8_t disp_num[6];
+uint8_t disp_next[6];
 uint8_t disp_duty[6];
 
 uint16_t rx_counter;
@@ -89,7 +103,6 @@ void delay_execution(void (*func_ptr)(void), uint16_t delay_ms);
 //- IRQ
 //-------------------------------------------------------
 //---- timer_alarm0 : 1秒ごとの割り込み ----
-// RTCによる更新
 static void timer_alarm0_irq(void) {
     datetime_t time;
     uint8_t i;
@@ -102,7 +115,6 @@ static void timer_alarm0_irq(void) {
     if(flg_time_correct==false){
         rtc_get_datetime(&time);
 
-
         disp_num[0] = time.sec%10;
         disp_num[1] = time.sec/10;
         disp_num[2] = time.min%10;
@@ -110,11 +122,6 @@ static void timer_alarm0_irq(void) {
         disp_num[4] = time.hour%10;
         disp_num[5] = time.hour/10;
 
-        for(i=0;i<6;i++){
-            uart_putc(UART_DEBUG,'0'+disp_num[i]);
-        }
-        uart_putc(UART_DEBUG, '\n');
-        uart_putc(UART_DEBUG, '\r');
     }
 
 }
@@ -127,12 +134,15 @@ static void timer_alerm1_irq(void) {
     uint64_t target = timer_hw->timerawl + 10000; // interval 40ms
     timer_hw->alarm[1] = (uint32_t)target;
 
+    // 1PPS LED 
     if(pps_led_counter!=0){
         pps_led_counter--;
         if(pps_led_counter==0){
             gpio_put(PPSLED_PIN, 0);
         }
     }
+
+
 
 /*
     uint32_t result = adc_read();
@@ -152,20 +162,14 @@ void gpio_callback(){
     datetime_t time;
     uint8_t i;
 
+    // Display time update
     rtc_get_datetime(&time);
-
     disp_num[0] = time.sec%10;
     disp_num[1] = time.sec/10;
     disp_num[2] = time.min%10;
     disp_num[3] = time.min/10;
     disp_num[4] = time.hour%10;
     disp_num[5] = time.hour/10;        
-
-    for(i=0;i<6;i++){
-        uart_putc(UART_DEBUG,'0'+disp_num[i]);
-    }
-    uart_putc(UART_DEBUG, '\n');
-    uart_putc(UART_DEBUG, '\r');
 
     // 1PPS_LED ON (200ms)
     gpio_put(PPSLED_PIN, 1);
@@ -358,7 +362,7 @@ int main(){
 
     hardware_init();
 
-    // タイマのセッティング
+    // Timer Settings
     hw_set_bits(&timer_hw->inte, 1u<<0);        // Alarm0
     irq_set_exclusive_handler(TIMER_IRQ_0, timer_alarm0_irq);
     irq_set_enabled(TIMER_IRQ_0, true);
@@ -368,7 +372,7 @@ int main(){
     hw_set_bits(&timer_hw->inte, 1u<<1);        // Alarm1
     irq_set_exclusive_handler(TIMER_IRQ_1, timer_alerm1_irq);
     irq_set_enabled(TIMER_IRQ_1, true);
-    target = timer_hw->timerawl + 100000;   // interval 100ms
+    target = timer_hw->timerawl + 10000;   // interval 10ms
     timer_hw->alarm[1] = (uint32_t)target;
 
     // display number reset
@@ -379,10 +383,10 @@ int main(){
 
     count = 0;
 
-    // Core1に処理を割り当て
+    // Core1 Task 
     multicore_launch_core1(core1_entry);
 
-    // GPIO割り込み設定(1PPS)
+    // GPIO interrupt setting(1PPS)
     gpio_set_irq_enabled_with_callback(PPS_PIN, GPIO_IRQ_EDGE_RISE, true, &gpio_callback);
 
     while (1) {
@@ -392,12 +396,11 @@ int main(){
 
 
 //-------------------------------------------------
-// hardware initialization
+// Hardware initialization
 //-------------------------------------------------
 void hardware_init(void)
 {   
-//    stdio_init_all();
-
+    //---- GPIO -----------------
     gpio_init(KR_PIN);
     gpio_init(KL_PIN);
     gpio_init(K9_PIN);
@@ -587,23 +590,18 @@ void disp_nixie(uint num, uint digit){
         case 0:
             gpio_put(DIGIT1_PIN, 1);
             break;
-        
         case 1:
             gpio_put(DIGIT2_PIN, 1);
             break;
-        
         case 2:
             gpio_put(DIGIT3_PIN, 1);
             break;
-            
         case 3:
             gpio_put(DIGIT4_PIN, 1);
             break;
-            
         case 4:
             gpio_put(DIGIT5_PIN, 1);
             break;
-            
         case 5:
             gpio_put(DIGIT6_PIN, 1);
             break;
@@ -613,43 +611,33 @@ void disp_nixie(uint num, uint digit){
         case 0:
             gpio_put(K0_PIN,1);
             break;
-
         case 1:
             gpio_put(K1_PIN,1);
             break;
-
         case 2:
             gpio_put(K2_PIN,1);
             break;
-
         case 3:
             gpio_put(K3_PIN,1);
             break;
-
         case 4:
             gpio_put(K4_PIN,1);
             break;
-
         case 5:
             gpio_put(K5_PIN,1);
             break;
-
         case 6:
             gpio_put(K6_PIN,1);
             break;
-
         case 7:
             gpio_put(K7_PIN,1);
             break;
-
         case 8:
             gpio_put(K8_PIN,1);
             break;
-
         case 9:
             gpio_put(K9_PIN,1);
             break;
-
     }
 }
 
