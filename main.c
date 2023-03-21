@@ -80,6 +80,7 @@ uint8_t count;
 
 uint8_t disp_num[6];
 uint8_t disp_next[6];
+uint8_t disp_change[6];
 uint8_t disp_duty[6];
 
 uint16_t rx_counter;
@@ -88,9 +89,17 @@ uint8_t gps_time[16];
 uint8_t gps_date[16];
 uint8_t gps_valid=0;
 bool flg_time_correct=false;
+bool flg_change=false;
+uint16_t switch_counter=0;
 const uint8_t GPS_HEADER[7] = {'$','G','P','R','M','C',','};
 
 uint16_t pps_led_counter=0;
+
+enum SwitchMode{
+    normal,
+    crossfade,
+    cloud
+} switch_mode;
 
 //-------------------------------------------------------
 //- Function Prototyping
@@ -115,13 +124,29 @@ static void timer_alarm0_irq(void) {
     if(flg_time_correct==false){
         rtc_get_datetime(&time);
 
-        disp_num[0] = time.sec%10;
-        disp_num[1] = time.sec/10;
-        disp_num[2] = time.min%10;
-        disp_num[3] = time.min/10;
-        disp_num[4] = time.hour%10;
-        disp_num[5] = time.hour/10;
+        switch(switch_mode){
+            case normal:
+                disp_num[0] = time.sec%10;
+                disp_num[1] = time.sec/10;
+                disp_num[2] = time.min%10;
+                disp_num[3] = time.min/10;
+                disp_num[4] = time.hour%10;
+                disp_num[5] = time.hour/10;
+                break;
+            case crossfade:
+                disp_next[0] = time.sec%10;
+                disp_next[1] = time.sec/10;
+                disp_next[2] = time.min%10;
+                disp_next[3] = time.min/10;
+                disp_next[4] = time.hour%10;
+                disp_next[5] = time.hour/10;  
+                flg_change=true;
+                switch_counter=0;
+                break;
+            case cloud:
+                break;
 
+        }
     }
 
 }
@@ -129,6 +154,7 @@ static void timer_alarm0_irq(void) {
 //---- timer_alarm1 : 10msごとの割り込み ----
 static void timer_alerm1_irq(void) {
     uint8_t i;
+    datetime_t time;
     // Clear the irq
     hw_clear_bits(&timer_hw->intr, 1u << 1);
     uint64_t target = timer_hw->timerawl + 10000; // interval 40ms
@@ -142,9 +168,49 @@ static void timer_alerm1_irq(void) {
         }
     }
 
+    //---- Switch Mode -----------------------
+    switch(switch_mode){
+        case normal:
+            break;
 
+        case crossfade:
+            if(flg_change){
+                if(switch_counter!=20){
+                    switch_counter++;
+                }else{
+                    for(i=0;i<6;i++){
+                        disp_num[i] = disp_next[i];
+                    }
+                    flg_change=false;
+                }
+            }
+            break;
+        case cloud:
+            if(flg_change){
+                if(switch_counter!=20){
+                    if((switch_counter%4)==0){
+                        for(i=0;i<6;i++){
+                            if(disp_change[i]==1){
+                                disp_num[i]=(disp_num[i]+(switch_counter/4))%10;
+                            }
+                        }
+                    }
+                    switch_counter++;
+                }else{
+                    flg_change=false;
+                    
+                    rtc_get_datetime(&time);
+                    disp_num[0] = time.sec%10;
+                    disp_num[1] = time.sec/10;
+                    disp_num[2] = time.min%10;
+                    disp_num[3] = time.min/10;
+                    disp_num[4] = time.hour%10;
+                    disp_num[5] = time.hour/10; 
+                }
+            }
+            break;
+    }
 
-/*
     uint32_t result = adc_read();
     uint8_t duty = result*100/3000;
     if(duty > 100) duty=100;
@@ -153,8 +219,6 @@ static void timer_alerm1_irq(void) {
     for(i=0;i<6;i++){
         disp_duty[i] = duty;
     }
-*/
-    
 }
 
 //---- GPIO割り込み(1PPS) ----
@@ -164,12 +228,54 @@ void gpio_callback(){
 
     // Display time update
     rtc_get_datetime(&time);
-    disp_num[0] = time.sec%10;
-    disp_num[1] = time.sec/10;
-    disp_num[2] = time.min%10;
-    disp_num[3] = time.min/10;
-    disp_num[4] = time.hour%10;
-    disp_num[5] = time.hour/10;        
+    switch(switch_mode){
+        case normal:
+            disp_num[0] = time.sec%10;
+            disp_num[1] = time.sec/10;
+            disp_num[2] = time.min%10;
+            disp_num[3] = time.min/10;
+            disp_num[4] = time.hour%10;
+            disp_num[5] = time.hour/10; 
+            break;
+        
+        case crossfade:
+            disp_next[0] = time.sec%10;
+            disp_next[1] = time.sec/10;
+            disp_next[2] = time.min%10;
+            disp_next[3] = time.min/10;
+            disp_next[4] = time.hour%10;
+            disp_next[5] = time.hour/10;  
+            flg_change=true;
+            switch_counter=0;
+            break;
+        case cloud:
+            for(i=0;i<6;i++){
+                disp_next[i] = disp_num[i];
+            }
+            disp_num[0] = time.sec%10;
+            disp_num[1] = time.sec/10;
+            disp_num[2] = time.min%10;
+            disp_num[3] = time.min/10;
+            disp_num[4] = time.hour%10;
+            disp_num[5] = time.hour/10; 
+
+            // 数値が変わった桁はdisp_nextを1にする。
+            for(i=0;i<6;i++){
+                if(disp_next[i]==disp_num[i]){
+                    disp_change[i]=0;
+                /*    if(disp_num[i]>4){
+                        disp_num[i]=disp_num[i]-5;
+                    }else{
+                        disp_num[i]=disp_num[i]+5;
+                    }*/
+                }else{
+                    disp_change[i]=1;
+                }
+            }
+            flg_change=true;
+            switch_counter=0;
+            break;
+    }
 
     // 1PPS_LED ON (200ms)
     gpio_put(PPSLED_PIN, 1);
@@ -336,14 +442,41 @@ void on_uart_rx(){
 //---------------------------------------------------------
 // core1はニキシー管の表示処理のみ行う。
 void core1_entry(){
-    uint8_t i;
+    uint8_t i,j;
 
     while(1){
         for(i=0;i<6;i++){
-            disp_nixie(disp_num[i],i);
-            sleep_us(5*disp_duty[i]);
+            
+            // Switch Mode毎の処理
+            switch(switch_mode){
+                case normal:
+                    // 通常の切り替え
+                    disp_nixie(disp_num[i],i);
+                    sleep_us(20*disp_duty[i]);
+                    break;
+                case crossfade:
+                    // クロスフェード
+                    if(flg_change){
+                        disp_nixie(disp_num[i],i);
+                        sleep_us(1*disp_duty[i]*(20-switch_counter));
+
+                        disp_nixie(disp_next[i],i);
+                        sleep_us(1*disp_duty[i]*switch_counter);
+                    }else{
+                        disp_nixie(disp_num[i],i);
+                        sleep_us(20*disp_duty[i]);                        
+                    }
+                    break;
+                case cloud:
+                    // クラウド(パタパタ)
+                    disp_nixie(disp_num[i],i);
+                    sleep_us(20*disp_duty[i]);
+                    break;
+            }
+
             disp_nixie(10,6); // blank time
-            sleep_us(5*(100-disp_duty[i]));
+            sleep_us(20*(100-disp_duty[i]));
+
             sleep_us(300);
         }
     }
@@ -357,6 +490,8 @@ int main(){
 
     uint8_t i;
     datetime_t time;
+
+    switch_mode = cloud;
 
     bi_decl(bi_program_description("This is a test program for nixie6."));
 
@@ -379,6 +514,7 @@ int main(){
     for(i=0;i<6;i++){
         disp_num[i]=0;
         disp_duty[i]=100;
+        disp_next[i]=0;
     }
 
     count = 0;
