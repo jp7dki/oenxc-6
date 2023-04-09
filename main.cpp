@@ -110,6 +110,7 @@ struct TaskList{
 
 enum SwitchMode{
     normal,
+    fade,
     crossfade,
     cloud,
     dotmove
@@ -164,6 +165,7 @@ static void timer_alarm0_irq(void) {
                     disp_num[4] = time.hour%10;
                     disp_num[5] = time.hour/10;
                     break;
+                case fade:
                 case crossfade:
                     // cross-fade
                     disp_next[0] = time.sec%10;
@@ -253,6 +255,7 @@ static void timer_alerm1_irq(void) {
         case normal:
             break;
 
+        case fade:
         case crossfade:
             if(flg_change){
                 if(switch_counter!=20){
@@ -357,13 +360,19 @@ static void timer_alerm1_irq(void) {
             }
     }
 
+    //---- light sensor -------------------
     uint32_t result = adc_read();
     uint8_t duty = result*100/3000;
     if(duty > 100) duty=100;
     if(duty <20) duty=20;
+
+
+    uint slice_num0 = pwm_gpio_to_slice_num(VCONT_PIN);
+    pwm_set_chan_level(slice_num0, PWM_CHAN_A, 1800*duty/100);
     
     for(i=0;i<6;i++){
-        disp_duty[i] = duty;
+//        disp_duty[i] = duty;
+//        disp_duty[i] = 100;
     }
 }
 
@@ -387,6 +396,7 @@ void gpio_callback(uint gpio, uint32_t event){
                 flg_change=true;
                 break;
             
+            case fade:
             case crossfade:
                 // crossfade switch
                 disp_next[0] = time.sec%10;
@@ -477,7 +487,7 @@ void core1_entry(){
                     disp_nixie(10,6); // blank time
                     sleep_us(20*(100-disp_duty[i]));
 
-                    sleep_us(300);
+                    sleep_us(150);
                 }
                 break;
 
@@ -491,6 +501,28 @@ void core1_entry(){
                             // 通常の切り替え
                             disp_nixie(disp_num[i],i);
                             sleep_us(20*disp_duty[i]);
+                            break;
+
+                        case fade:
+                            // フェード
+                            if(flg_change && (disp_num[i]!=disp_next[i])){
+                                if(switch_counter<10){
+                                    disp_nixie(disp_num[i],i);
+                                    sleep_us(1*disp_duty[i]*(20-2*switch_counter));
+
+                                    disp_nixie(10,6);          // nixie off
+                                    sleep_us(1*disp_duty[i]*2*switch_counter);
+                                }else{
+                                    disp_nixie(disp_next[i],i);
+                                    sleep_us(1*disp_duty[i]*(2*(switch_counter-10)));
+
+                                    disp_nixie(10,6);          // nixie off
+                                    sleep_us(1*disp_duty[i]*2*(20-switch_counter));
+                                }
+                            }else{
+                                disp_nixie(disp_num[i],i);
+                                sleep_us(20*disp_duty[i]); 
+                            }
                             break;
                         case crossfade:
                             // クロスフェード
@@ -519,7 +551,7 @@ void core1_entry(){
                     disp_nixie(10,6); // blank time
                     sleep_us(20*(100-disp_duty[i]));
 
-                    sleep_us(300);
+                    sleep_us(150);
                 }
                 break;
             
@@ -539,7 +571,7 @@ void core1_entry(){
                     disp_nixie(10,6); // blank time
                     sleep_us(20*(100-disp_duty[i]));
 
-                    sleep_us(300);
+                    sleep_us(150);
                 }
 
             defalut:
@@ -565,7 +597,7 @@ int main(){
     }
 
     // mode initialization
-    switch_mode = crossfade;
+    switch_mode = fade;
     operation_mode = clock_display;
 
     bi_decl(bi_program_description("This is a test program for nixie6."));
@@ -605,6 +637,19 @@ int main(){
     
     // number all number check
     sleep_ms(500);
+
+    for(i=0;i<6;i++){
+        disp_duty[i]=0;
+        disp_num[i]=0;
+    }
+
+    for(i=0;i<100;i++){
+        for(j=0;j<6;j++){
+            disp_duty[j]++;
+        }
+        sleep_ms(8);
+    }
+
     for(i=0;i<10;i++){
         for(j=0;j<6;j++){
             disp_num[j]=i;
@@ -699,7 +744,7 @@ int main(){
                                 break;
                             case 5:
                                 switch_mode = (SwitchMode)((uint8_t)switch_mode + 1);
-                                if(switch_mode==4) switch_mode = normal;
+                                if(switch_mode==5) switch_mode = normal;
                                 break;
                         }
                 }
