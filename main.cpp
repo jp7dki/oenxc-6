@@ -43,6 +43,8 @@
 #define UART_GPS uart1
 #define BAUD_RATE_GPS 9600
 
+#define NUM_TASK 10
+
 //-------------------------------------------------------
 //- Global Variable
 //-------------------------------------------------------
@@ -96,6 +98,15 @@ uint16_t switch_counter=0;
 const uint8_t GPS_HEADER[7] = {'$','G','P','R','M','C',','};
 
 uint16_t pps_led_counter=0;
+uint16_t blink_counter[6] = {0,0,0,0,0,0};
+uint8_t cursor;
+
+// task list of delay execution.
+typedef void (*func_ptr)(void);
+struct TaskList{
+    func_ptr func;
+    uint16_t delay_10ms;
+} task_list[NUM_TASK];
 
 enum SwitchMode{
     normal,
@@ -122,6 +133,9 @@ void hardware_init(void);
 void disp_nixie(uint num, uint digit);
 void delay_execution(void (*func_ptr)(void), uint16_t delay_ms);
 void gps_receive(char char_recv);
+
+bool task_add(func_ptr func, uint16_t delay_10ms);
+void pps_led_off(void);
 
 //-------------------------------------------------------
 //- IRQ
@@ -209,11 +223,28 @@ static void timer_alerm1_irq(void) {
     uint64_t target = timer_hw->timerawl + 10000; // interval 40ms
     timer_hw->alarm[1] = (uint32_t)target;
 
+    // Delay task
+    for(i=0;i<NUM_TASK;i++){
+        if(task_list[i].delay_10ms != 0){
+            task_list[i].delay_10ms--;
+            if(task_list[i].delay_10ms == 0){
+                task_list[i].func();
+            }
+        }
+    }
+
     // 1PPS LED 
     if(pps_led_counter!=0){
         pps_led_counter--;
         if(pps_led_counter==0){
             gpio_put(PPSLED_PIN, 0);
+        }
+    }
+
+    // blink
+    for(i=0;i<6;i++){
+        if(blink_counter[i]!=0){
+            blink_counter[i]--;
         }
     }
 
@@ -323,9 +354,6 @@ static void timer_alerm1_irq(void) {
                     switch_counter=0;
                     flg_change=false;
                 }
-
-
-
             }
     }
 
@@ -409,7 +437,7 @@ void gpio_callback(uint gpio, uint32_t event){
 
         // 1PPS_LED ON (200ms)
         gpio_put(PPSLED_PIN, 1);
-        pps_led_counter=10;
+        task_add(pps_led_off, 20);
     }
 
 }
@@ -494,6 +522,25 @@ void core1_entry(){
                     sleep_us(300);
                 }
                 break;
+            
+            case switching_settings:
+                disp_num[5] = switch_mode;
+                for(i=0;i<5;i++){
+                    disp_num[i] = 0;
+                }
+
+                disp_num[cursor] |= 0x10;
+                
+                for(i=0;i<6;i++){
+                    // 通常の切り替え
+                    disp_nixie(disp_num[i],i);
+                    sleep_us(20*disp_duty[i]);
+
+                    disp_nixie(10,6); // blank time
+                    sleep_us(20*(100-disp_duty[i]));
+
+                    sleep_us(300);
+                }
 
             defalut:
                 break;    
@@ -509,7 +556,13 @@ void core1_entry(){
 int main(){
 
     uint16_t i,j;
+    uint16_t count_sw;
     datetime_t time;
+
+    // task initialization
+    for(i=0;i<NUM_TASK;i++){
+        task_list[i].delay_10ms = 0;
+    }
 
     // mode initialization
     switch_mode = crossfade;
@@ -579,9 +632,113 @@ int main(){
     // Clock Display mode
     operation_mode = clock_display;
 
-
     while (1) {
+        //---- SWA -----------------------
+        if(!gpio_get(SWA_PIN)){
+            count_sw = 0;
+            sleep_ms(100);
+            while((!gpio_get(SWA_PIN)) && (count_sw<200)){
+                count_sw++;
+                sleep_ms(10);
+            }
+
+            if(count_sw==200){
+                // Long-push
+                switch(operation_mode){
+                    case clock_display:
+                        operation_mode = switching_settings;
+                        break;
+                    case switching_settings:
+                        operation_mode = clock_display;
+                        break;
+                }
+            }else{
+                // Short-push
+                switch(operation_mode){
+                    case clock_display:
+
+                        break;
+                    case switching_settings:
+                        cursor++;
+                        if(cursor==6) cursor=0;
+                        break;
+                }
+            }
+
+            while(!gpio_get(SWA_PIN));
+        }
         
+
+        //---- SWB -----------------------
+        if(!gpio_get(SWB_PIN)){
+            count_sw = 0;
+            sleep_ms(100);
+            while((!gpio_get(SWB_PIN)) && (count_sw<200)){
+                count_sw++;
+                sleep_ms(10);
+            }
+
+            if(count_sw==200){
+                // Long-push
+                gpio_put(DBGLED_PIN,1);
+            }else{
+                // Short-push
+                switch(operation_mode){
+                    case clock_display:
+
+                        break;
+                    case switching_settings:
+                        switch(cursor){
+                            case 0:
+                            case 1:
+                            case 2:
+                            case 3:
+                            case 4:
+                                disp_num[cursor]++;
+                                if(disp_num[cursor]==10) disp_num[cursor] = 0;
+                                break;
+                            case 5:
+                                switch_mode = (SwitchMode)((uint8_t)switch_mode + 1);
+                                if(switch_mode==4) switch_mode = normal;
+                                break;
+                        }
+                }
+            }
+
+            while(!gpio_get(SWB_PIN));
+        }
+
+
+        //---- SWC -----------------------
+        if(!gpio_get(SWC_PIN)){
+            count_sw = 0;
+            sleep_ms(100);
+            while((!gpio_get(SWC_PIN)) && (count_sw<200)){
+                count_sw++;
+                sleep_ms(10);
+            }
+
+            if(count_sw==200){
+                // Long-push
+                gpio_put(DBGLED_PIN,1);
+            }else{
+                // Short-push
+                switch(operation_mode){
+                    case clock_display:
+
+                        break;
+                    case switching_settings:
+                        if(cursor==0){
+                            cursor=5;
+                        }else{
+                            cursor--;
+                        }
+                        break;
+                }
+            }
+
+            while(!gpio_get(SWC_PIN));
+        }
 
     }
 }
@@ -992,4 +1149,29 @@ void gps_receive(char char_recv)
         rx_sentence_counter=0;
         rx_counter=0;
     }
+}
+
+//----------------------------------
+// delayed task
+//----------------------------------
+bool task_add(func_ptr func, uint16_t delay_10ms){
+    uint8_t i;
+
+    i = 0;
+    while((task_list[i].delay_10ms != 0) && (i<NUM_TASK)){
+        i++;
+    }
+
+    if(i==NUM_TASK){
+        return false;
+    }else{
+        task_list[i].func = func;
+        task_list[i].delay_10ms = delay_10ms;
+        return true;
+    }
+
+}
+
+void pps_led_off(void){
+    gpio_put(PPSLED_PIN, 0);
 }
