@@ -100,6 +100,7 @@ const uint8_t GPS_HEADER[7] = {'$','G','P','R','M','C',','};
 uint16_t pps_led_counter=0;
 uint16_t blink_counter[6] = {0,0,0,0,0,0};
 uint8_t cursor;
+uint8_t setting_num=1;
 
 // task list of delay execution.
 typedef void (*func_ptr)(void);
@@ -120,8 +121,7 @@ enum OperationMode{
     power_on,
     power_up_animation,
     clock_display,
-    blightness_settings,
-    switching_settings,
+    settings,
     time_adjust,
     random_disp,
     demo
@@ -555,13 +555,24 @@ void core1_entry(){
                 }
                 break;
             
-            case switching_settings:
-                disp_num[5] = switch_mode;
-                for(i=0;i<5;i++){
-                    disp_num[i] = 0;
-                }
+            case settings:
 
-                disp_num[cursor] |= 0x10;
+                // 番号の表示
+                if(setting_num>9){
+                    disp_num[5] = setting_num/10;
+                }else{
+                    disp_num[5] = 10;       // 消灯
+                }
+                disp_num[4] = setting_num%10 + 0x10;
+
+                switch(setting_num){
+                    // 切り替え
+                    case 1:
+                        disp_num[3] = 10;   // 消灯
+                        disp_num[2] = 10;   // 消灯
+                        disp_num[1] = 10;   // 消灯
+                        disp_num[0] = switch_mode;
+                }
                 
                 for(i=0;i<6;i++){
                     // 通常の切り替え
@@ -691,9 +702,9 @@ int main(){
                 // Long-push
                 switch(operation_mode){
                     case clock_display:
-                        operation_mode = switching_settings;
+                        operation_mode = settings;
                         break;
-                    case switching_settings:
+                    case settings:
                         operation_mode = clock_display;
                         break;
                 }
@@ -703,9 +714,8 @@ int main(){
                     case clock_display:
 
                         break;
-                    case switching_settings:
-                        cursor++;
-                        if(cursor==6) cursor=0;
+                    case settings:
+
                         break;
                 }
             }
@@ -732,21 +742,15 @@ int main(){
                     case clock_display:
 
                         break;
-                    case switching_settings:
-                        switch(cursor){
-                            case 0:
+                    case settings:
+
+                        switch(setting_num){
                             case 1:
-                            case 2:
-                            case 3:
-                            case 4:
-                                disp_num[cursor]++;
-                                if(disp_num[cursor]==10) disp_num[cursor] = 0;
-                                break;
-                            case 5:
                                 switch_mode = (SwitchMode)((uint8_t)switch_mode + 1);
                                 if(switch_mode==5) switch_mode = normal;
                                 break;
                         }
+                        break;
                 }
             }
 
@@ -772,12 +776,8 @@ int main(){
                     case clock_display:
 
                         break;
-                    case switching_settings:
-                        if(cursor==0){
-                            cursor=5;
-                        }else{
-                            cursor--;
-                        }
+                    case settings:
+
                         break;
                 }
             }
