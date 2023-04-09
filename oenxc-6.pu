@@ -1,0 +1,35 @@
+@startuml
+' 電源ONから初期化を開始
+' 初期化後は時計表示
+[*] --> PowerON
+PowerON --> PowerUpAnimation : End of Initialization
+PowerON : Initialize Hardware
+PowerUpAnimation --> ClockMode : End of Animation
+PowerUpAnimation : Display firmware version
+
+' どのモードからでもSWAを押すことで時計表示モード(ClockMode)に戻れるように設計する
+' モードの説明
+'   - ClockMode : 時計表示。現在時刻を表示する
+'　   - BlightnessSettings : 明るさの調整。全体と個別の桁を調整
+' 　  - SwitchingSettings : 時計表示の数値切り替えの設定
+'  　 - TimeAdjust : 時間の調整。手動時刻合わせ
+'   - RandomMode : 数値のランダム表示
+'   - DemoMode : 任意の数値表示
+
+state ClockMode {
+    [*] --> ClockDisplay
+    ClockDisplay --> BlightnessSettings : SWB long push
+    BlightnessSettings --> ClockDisplay : SWA long push
+    BlightnessSettings --> SwitchingSettings : SWB long push
+    SwitchingSettings --> TimeAdjust : SWB long push
+    SwitchingSettings --> ClockDisplay : SWA long push
+    TimeAdjust --> BlightnessSettings : SWB long push
+    TimeAdjust --> ClockDisplay : SWA long push
+}
+
+ClockMode --> RandomMode : SWC long push
+RandomMode --> DemoMode : SWC long push
+RandomMode --> ClockMode : SWA long push
+DemoMode --> ClockMode : SWA long push
+
+@enduml
