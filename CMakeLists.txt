@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 17)
 pico_sdk_init()
 
 add_executable(nixiev_firmware
-    main.c
+    main.cpp
 )
 
 pico_enable_stdio_usb(nixiev_firmware 1)

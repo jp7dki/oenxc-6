@@ -10,6 +10,7 @@
 //- Header files include
 //-------------------------------------------------------
 #include <stdio.h>
+#include <stdlib.h>
 #include "pico/stdlib.h"
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
@@ -45,6 +46,7 @@
 //-------------------------------------------------------
 //- Global Variable
 //-------------------------------------------------------
+const uint8_t version[6] = {0,0,0,1+0x10,0,0};
 const uint KR_PIN = 0;
 const uint KL_PIN = 1;
 const uint K9_PIN = 2;
@@ -109,7 +111,7 @@ enum OperationMode{
     blightness_settings,
     switching_settings,
     time_adjust,
-    random,
+    random_disp,
     demo
 } operation_mode;
 
@@ -119,6 +121,7 @@ enum OperationMode{
 void hardware_init(void);
 void disp_nixie(uint num, uint digit);
 void delay_execution(void (*func_ptr)(void), uint16_t delay_ms);
+void gps_receive(char char_recv);
 
 //-------------------------------------------------------
 //- IRQ
@@ -133,67 +136,68 @@ static void timer_alarm0_irq(void) {
     uint64_t target = timer_hw->timerawl + 999999; // interval 1s
     timer_hw->alarm[0] = (uint32_t)target;
 
-    if(flg_time_correct==false){
-        rtc_get_datetime(&time);
+    if(operation_mode==clock_display){
+        if(flg_time_correct==false){
+            rtc_get_datetime(&time);
 
-        switch(switch_mode){
-            case normal:
-                // normal
-                disp_num[0] = time.sec%10;
-                disp_num[1] = time.sec/10;
-                disp_num[2] = time.min%10;
-                disp_num[3] = time.min/10;
-                disp_num[4] = time.hour%10;
-                disp_num[5] = time.hour/10;
-                break;
-            case crossfade:
-                // cross-fade
-                disp_next[0] = time.sec%10;
-                disp_next[1] = time.sec/10;
-                disp_next[2] = time.min%10;
-                disp_next[3] = time.min/10;
-                disp_next[4] = time.hour%10;
-                disp_next[5] = time.hour/10;  
-                flg_change=true;
-                switch_counter=0;
-                break;
-            case cloud:
-                // cloud
-                for(i=0;i<6;i++){
-                    disp_next[i] = disp_num[i];
-                }
-                disp_num[0] = time.sec%10;
-                disp_num[1] = time.sec/10;
-                disp_num[2] = time.min%10;
-                disp_num[3] = time.min/10;
-                disp_num[4] = time.hour%10;
-                disp_num[5] = time.hour/10; 
-
-                // 数値が変わった桁はdisp_nextを1にする。
-                for(i=0;i<6;i++){
-                    if(disp_next[i]==disp_num[i]){
-                        disp_change[i]=0;
-                    }else{
-                        disp_change[i]=1;
+            switch(switch_mode){
+                case normal:
+                    // normal
+                    disp_num[0] = time.sec%10;
+                    disp_num[1] = time.sec/10;
+                    disp_num[2] = time.min%10;
+                    disp_num[3] = time.min/10;
+                    disp_num[4] = time.hour%10;
+                    disp_num[5] = time.hour/10;
+                    break;
+                case crossfade:
+                    // cross-fade
+                    disp_next[0] = time.sec%10;
+                    disp_next[1] = time.sec/10;
+                    disp_next[2] = time.min%10;
+                    disp_next[3] = time.min/10;
+                    disp_next[4] = time.hour%10;
+                    disp_next[5] = time.hour/10;  
+                    flg_change=true;
+                    switch_counter=0;
+                    break;
+                case cloud:
+                    // cloud
+                    for(i=0;i<6;i++){
+                        disp_next[i] = disp_num[i];
                     }
-                }
-                flg_change=true;
-                switch_counter=0;
-                break;
-            case dotmove:     
-                // dot-move 
-                disp_num[0] = time.sec%10;
-                disp_num[1] = time.sec/10;
-                disp_num[2] = time.min%10;
-                disp_num[3] = time.min/10;
-                disp_num[4] = time.hour%10;
-                disp_num[5] = time.hour/10; 
-                flg_change=true;
-                switch_counter=0;
+                    disp_num[0] = time.sec%10;
+                    disp_num[1] = time.sec/10;
+                    disp_num[2] = time.min%10;
+                    disp_num[3] = time.min/10;
+                    disp_num[4] = time.hour%10;
+                    disp_num[5] = time.hour/10; 
 
+                    // 数値が変わった桁はdisp_nextを1にする。
+                    for(i=0;i<6;i++){
+                        if(disp_next[i]==disp_num[i]){
+                            disp_change[i]=0;
+                        }else{
+                            disp_change[i]=1;
+                        }
+                    }
+                    flg_change=true;
+                    switch_counter=0;
+                    break;
+                case dotmove:     
+                    // dot-move 
+                    disp_num[0] = time.sec%10;
+                    disp_num[1] = time.sec/10;
+                    disp_num[2] = time.min%10;
+                    disp_num[3] = time.min/10;
+                    disp_num[4] = time.hour%10;
+                    disp_num[5] = time.hour/10; 
+                    flg_change=true;
+                    switch_counter=0;
+
+            }
         }
     }
-
 }
 
 //---- timer_alarm1 : 10msごとの割り込み ----
@@ -336,228 +340,92 @@ static void timer_alerm1_irq(void) {
 }
 
 //---- GPIO割り込み(1PPS) ----
-void gpio_callback(){
+void gpio_callback(uint gpio, uint32_t event){
     datetime_t time;
     uint8_t i;
 
-    // Display time update
-    rtc_get_datetime(&time);
-    switch(switch_mode){
-        case normal:
-            // normal switch
-            disp_num[0] = time.sec%10;
-            disp_num[1] = time.sec/10;
-            disp_num[2] = time.min%10;
-            disp_num[3] = time.min/10;
-            disp_num[4] = time.hour%10;
-            disp_num[5] = time.hour/10; 
-            break;
-        
-        case crossfade:
-            // crossfade switch
-            disp_next[0] = time.sec%10;
-            disp_next[1] = time.sec/10;
-            disp_next[2] = time.min%10;
-            disp_next[3] = time.min/10;
-            disp_next[4] = time.hour%10;
-            disp_next[5] = time.hour/10;  
-            flg_change=true;
-            switch_counter=0;
-            break;
+    if(operation_mode==clock_display){
+        // Display time update
+        rtc_get_datetime(&time);
+        switch(switch_mode){
+            case normal:
+                // normal switch
+                disp_num[0] = time.sec%10;
+                disp_num[1] = time.sec/10;
+                disp_num[2] = time.min%10;
+                disp_num[3] = time.min/10;
+                disp_num[4] = time.hour%10;
+                disp_num[5] = time.hour/10; 
+                flg_change=true;
+                break;
+            
+            case crossfade:
+                // crossfade switch
+                disp_next[0] = time.sec%10;
+                disp_next[1] = time.sec/10;
+                disp_next[2] = time.min%10;
+                disp_next[3] = time.min/10;
+                disp_next[4] = time.hour%10;
+                disp_next[5] = time.hour/10;  
+                flg_change=true;
+                switch_counter=0;
+                break;
 
-        case cloud:
-            // cloud(pata-pata) switch
-            for(i=0;i<6;i++){
-                disp_next[i] = disp_num[i];
-            }
-            disp_num[0] = time.sec%10;
-            disp_num[1] = time.sec/10;
-            disp_num[2] = time.min%10;
-            disp_num[3] = time.min/10;
-            disp_num[4] = time.hour%10;
-            disp_num[5] = time.hour/10; 
-
-            // 数値が変わった桁はdisp_changeを1にする。
-            for(i=0;i<6;i++){
-                if(disp_next[i]==disp_num[i]){
-                    disp_change[i]=0;
-                }else{
-                    disp_change[i]=1;
+            case cloud:
+                // cloud(pata-pata) switch
+                for(i=0;i<6;i++){
+                    disp_next[i] = disp_num[i];
                 }
-            }
-            flg_change=true;
-            switch_counter=0;
-            break;
+                disp_num[0] = time.sec%10;
+                disp_num[1] = time.sec/10;
+                disp_num[2] = time.min%10;
+                disp_num[3] = time.min/10;
+                disp_num[4] = time.hour%10;
+                disp_num[5] = time.hour/10; 
 
-        case dotmove:
-            // dot-move 
-            disp_num[0] = time.sec%10;
-            disp_num[1] = time.sec/10;
-            disp_num[2] = time.min%10;
-            disp_num[3] = time.min/10;
-            disp_num[4] = time.hour%10;
-            disp_num[5] = time.hour/10; 
-            flg_change=true;
-            switch_counter=0;
+                // 数値が変わった桁はdisp_changeを1にする。
+                for(i=0;i<6;i++){
+                    if(disp_next[i]==disp_num[i]){
+                        disp_change[i]=0;
+                    }else{
+                        disp_change[i]=1;
+                    }
+                }
+                flg_change=true;
+                switch_counter=0;
+                break;
+
+            case dotmove:
+                // dot-move 
+                disp_num[0] = time.sec%10;
+                disp_num[1] = time.sec/10;
+                disp_num[2] = time.min%10;
+                disp_num[3] = time.min/10;
+                disp_num[4] = time.hour%10;
+                disp_num[5] = time.hour/10; 
+                flg_change=true;
+                switch_counter=0;
+        }
+
+        // 1PPS_LED ON (200ms)
+        gpio_put(PPSLED_PIN, 1);
+        pps_led_counter=10;
     }
 
-    // 1PPS_LED ON (200ms)
-    gpio_put(PPSLED_PIN, 1);
-    pps_led_counter=10;
 }
 
 //---- uart_rx : GPSの受信割り込み --------------------
 void on_uart_rx(){
     int i;
     uint8_t ch;
-    uint8_t hour,min,sec;
+
+    uart_putc(UART_DEBUG, ch);
 
     // GPSの受信処理 GPRMCのみ処理する
     while(uart_is_readable(UART_GPS)){
         ch = uart_getc(UART_GPS);
 
-        switch(rx_sentence_counter){
-            case 0:
-                // $GPRMC待ち
-                if(GPS_HEADER[rx_counter]==ch){
-                    rx_counter++;
-                }else{
-                    rx_counter=0;
-                }
-
-                if(rx_counter==7){
-                    rx_sentence_counter++;
-                    rx_counter=0;
-                }
-                break;
-            case 1:
-                // 時刻取得
-                if(ch==','){
-                    rx_sentence_counter++;
-                    rx_counter=0;
-                }else{
-                    gps_time[rx_counter]=ch;
-                    rx_counter++;
-                }
-                break;
-            case 2:
-                // Status取得
-                if(ch==','){
-                    rx_sentence_counter++;
-                    rx_counter=0;
-                }else{
-                    gps_valid=ch;
-                    rx_counter++;
-                }
-                break;
-            case 3:
-                // 緯度
-                if(ch==','){
-                    rx_sentence_counter++;
-                    rx_counter=0;
-                }else{
-                    // 読み捨て
-                    rx_counter++;
-                }
-                break;
-            case 4:
-                // 北緯or南緯
-                if(ch==','){
-                    rx_sentence_counter++;
-                    rx_counter=0;
-                }else{
-                    // 読み捨て
-                    rx_counter++;
-                }
-                break;
-            case 5:
-                // 経度
-                if(ch==','){
-                    rx_sentence_counter++;
-                    rx_counter=0;
-                }else{
-                    // 読み捨て 
-                    rx_counter++;
-                }
-                break;
-            case 6:
-                // 東経or西経
-                if(ch==','){
-                    rx_sentence_counter++;
-                    rx_counter=0;
-                }else{
-                    // 読み捨て
-                    rx_counter++;
-                }
-                break;
-            case 7:
-                // 地表における移動の速度
-                if(ch==','){
-                    rx_sentence_counter++;
-                    rx_counter=0;
-                }else{
-                    // 読み捨て
-                    rx_counter++;
-                }
-                break;
-            case 8:
-                // 地表における移動の真方位
-                if(ch==','){
-                    rx_sentence_counter++;
-                    rx_counter=0;
-                }else{
-                    // 読み捨て
-                    rx_counter++;
-                }
-                break;
-            case 9:
-                // 時刻取得
-                if(ch==','){
-                    rx_sentence_counter++;
-                    rx_counter=0;
-
-                    if((gps_valid=='A') && (flg_time_correct==false)){
-                        hour = (gps_time[0]-48)*10+(gps_time[1]-48);
-                        min = (gps_time[2]-48)*10+(gps_time[3]-48);
-                        sec = (gps_time[4]-48)*10+(gps_time[5]-48);
-
-                        // JSTへの補正
-                        if(hour>14){
-                            hour = hour + 9 -24;
-                        }else{
-                            hour = hour + 9;
-                        }                        
-                        
-                        datetime_t t = {
-                            .year = 2000+(gps_date[4]-48)*10+(gps_date[5]-48),
-                            .month = (gps_date[2]-48)*10+(gps_date[3]-48),
-                            .day = (gps_date[0]-48)*10+(gps_date[1]-48),
-                            .dotw = 1,
-                            .hour = hour,
-                            .min = min,
-                            .sec = sec
-                        };
-
-                        // RTCをリセットしておく
-                        reset_block(RESETS_RESET_RTC_BITS);
-                        unreset_block_wait(RESETS_RESET_RTC_BITS);
-                        rtc_init();
-
-                        rtc_set_datetime(&t);
-
-                        flg_time_correct=true;
-                    }
-
-                    
-                }else{
-                    gps_date[rx_counter]=ch;
-                    rx_counter++;
-                }
-                break;
-            default:
-                rx_sentence_counter=0;
-                rx_counter=0;
-        }
+        gps_receive(ch);
     }
 }
 
@@ -640,12 +508,12 @@ void core1_entry(){
 // 
 int main(){
 
-    uint8_t i;
+    uint16_t i,j;
     datetime_t time;
 
     // mode initialization
     switch_mode = crossfade;
-    operation_mode = power_on;
+    operation_mode = clock_display;
 
     bi_decl(bi_program_description("This is a test program for nixie6."));
 
@@ -681,6 +549,35 @@ int main(){
 
     // Power-Up-Animation
     operation_mode = power_up_animation;
+    
+    // number all number check
+    sleep_ms(500);
+    for(i=0;i<10;i++){
+        for(j=0;j<6;j++){
+            disp_num[j]=i;
+        }
+        sleep_ms(300);
+    }
+
+    // random number -> firmware version
+    rtc_get_datetime(&time);
+    srand(time.month+time.day+time.hour+time.min+time.sec);
+    for(j=0;j<(6*40+100);j++){
+        for(i=0;i<6;i++){
+            if(j<(i*20)){
+                disp_num[i] = disp_num[i];
+            }else if(j<((i*40)+100)){
+                disp_num[i] = (uint8_t)(rand()%10)+0x30;
+            }else{
+                disp_num[i] = version[i];
+            }
+        }
+        sleep_ms(5);
+    }
+    sleep_ms(500);
+
+    // Clock Display mode
+    operation_mode = clock_display;
 
 
     while (1) {
@@ -798,7 +695,7 @@ void hardware_init(void)
     //---- PWM -----------------
     uint slice_num0 = pwm_gpio_to_slice_num(VCONT_PIN);
     pwm_set_wrap(slice_num0, 3000);
-    pwm_set_chan_level(slice_num0, PWM_CHAN_A, 1185);
+    pwm_set_chan_level(slice_num0, PWM_CHAN_A, 1800);
     pwm_set_enabled(slice_num0, true);
 
     //---- UART ----------------
@@ -949,6 +846,150 @@ void disp_nixie(uint num, uint digit){
     }
 }
 
-void delay_execution(void (*func_ptr)(void), uint16_t delay_ms){
-    
+void gps_receive(char char_recv)
+{
+    uint8_t hour,min,sec;
+
+    switch(rx_sentence_counter){
+    case 0:
+        // $GPRMC待ち
+        if(GPS_HEADER[rx_counter]==char_recv){
+            rx_counter++;
+        }else{
+            rx_counter=0;
+        }
+
+        if(rx_counter==7){
+            rx_sentence_counter++;
+            rx_counter=0;
+        }
+        break;
+    case 1:
+        // 時刻取得
+        if(char_recv==','){
+            rx_sentence_counter++;
+            rx_counter=0;
+        }else{
+            gps_time[rx_counter]=char_recv;
+            rx_counter++;
+        }
+        break;
+    case 2:
+        // Status取得
+        if(char_recv==','){
+            rx_sentence_counter++;
+            rx_counter=0;
+        }else{
+            gps_valid=char_recv;
+            rx_counter++;
+        }
+        break;
+    case 3:
+        // 緯度
+        if(char_recv==','){
+            rx_sentence_counter++;
+            rx_counter=0;
+        }else{
+            // 読み捨て
+            rx_counter++;
+        }
+        break;
+    case 4:
+        // 北緯or南緯
+        if(char_recv==','){
+            rx_sentence_counter++;
+            rx_counter=0;
+        }else{
+            // 読み捨て
+            rx_counter++;
+        }
+        break;
+    case 5:
+        // 経度
+        if(char_recv==','){
+            rx_sentence_counter++;
+            rx_counter=0;
+        }else{
+            // 読み捨て 
+            rx_counter++;
+        }
+        break;
+    case 6:
+        // 東経or西経
+        if(char_recv==','){
+            rx_sentence_counter++;
+            rx_counter=0;
+        }else{
+            // 読み捨て
+            rx_counter++;
+        }
+        break;
+    case 7:
+        // 地表における移動の速度
+        if(char_recv==','){
+            rx_sentence_counter++;
+            rx_counter=0;
+        }else{
+            // 読み捨て
+            rx_counter++;
+        }
+        break;
+    case 8:
+        // 地表における移動の真方位
+        if(char_recv==','){
+            rx_sentence_counter++;
+            rx_counter=0;
+        }else{
+            // 読み捨て
+            rx_counter++;
+        }
+        break;
+    case 9:
+        // 時刻取得
+        if(char_recv==','){
+            rx_sentence_counter++;
+            rx_counter=0;
+
+            if((gps_valid=='A') && (flg_time_correct==false)){
+                hour = (gps_time[0]-48)*10+(gps_time[1]-48);
+                min = (gps_time[2]-48)*10+(gps_time[3]-48);
+                sec = (gps_time[4]-48)*10+(gps_time[5]-48);
+
+                // JSTへの補正
+                if(hour>14){
+                    hour = hour + 9 -24;
+                }else{
+                    hour = hour + 9;
+                }                        
+                
+                datetime_t t = {
+                    .year = 2000+(gps_date[4]-48)*10+(gps_date[5]-48),
+                    .month = (gps_date[2]-48)*10+(gps_date[3]-48),
+                    .day = (gps_date[0]-48)*10+(gps_date[1]-48),
+                    .dotw = 1,
+                    .hour = hour,
+                    .min = min,
+                    .sec = sec
+                };
+
+                // RTCをリセットしておく
+                reset_block(RESETS_RESET_RTC_BITS);
+                unreset_block_wait(RESETS_RESET_RTC_BITS);
+                rtc_init();
+
+                rtc_set_datetime(&t);
+
+                flg_time_correct=true;
+            }
+
+            
+        }else{
+            gps_date[rx_counter]=char_recv;
+            rx_counter++;
+        }
+        break;
+    default:
+        rx_sentence_counter=0;
+        rx_counter=0;
+    }
 }

@@ -2,8 +2,10 @@
 ' 電源ONから初期化を開始
 ' 初期化後は時計表示
 [*] --> PowerON
-PowerON --> ClockMode : End of Initialization
+PowerON --> PowerUpAnimation : End of Initialization
 PowerON : Initialize Hardware
+PowerUpAnimation --> ClockMode : End of Animation
+PowerUpAnimation : Display firmware version
 
 ' どのモードからでもSWAを押すことで時計表示モード(ClockMode)に戻れるように設計する
 ' モードの説明
