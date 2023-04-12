@@ -44,6 +44,10 @@
 #define BAUD_RATE_GPS 9600
 
 #define NUM_TASK 10
+#define SETTING_MAX_NUM 10
+
+// PINK filter
+#define MAX_Z 16
 
 //-------------------------------------------------------
 //- Global Variable
@@ -101,6 +105,10 @@ uint16_t pps_led_counter=0;
 uint16_t blink_counter[6] = {0,0,0,0,0,0};
 uint8_t cursor;
 uint8_t setting_num=1;
+// setting parameters
+uint8_t param_brightness = 5;
+uint8_t param_brightness_auto = 1;
+uint16_t fluctuation_level=0;
 
 // task list of delay execution.
 typedef void (*func_ptr)(void);
@@ -137,6 +145,10 @@ void gps_receive(char char_recv);
 
 bool task_add(func_ptr func, uint16_t delay_10ms);
 void pps_led_off(void);
+/*
+void init_pink(void);
+float pinkfilter(float in);
+*/
 
 //-------------------------------------------------------
 //- IRQ
@@ -361,19 +373,20 @@ static void timer_alerm1_irq(void) {
     }
 
     //---- light sensor -------------------
-    uint32_t result = adc_read();
-    uint8_t duty = result*100/3000;
-    if(duty > 100) duty=100;
-    if(duty <20) duty=20;
+    uint8_t duty;
+    if(param_brightness_auto==1){
+        uint32_t result = adc_read();
+        duty = result*100/3000;
+        if(duty > 100) duty=100;
+        if(duty <20) duty=20;
+    }else{
+        duty = 100;
+    }
 
 
     uint slice_num0 = pwm_gpio_to_slice_num(VCONT_PIN);
-    pwm_set_chan_level(slice_num0, PWM_CHAN_A, 1800*duty/100);
+    pwm_set_chan_level(slice_num0, PWM_CHAN_A, ((1000+160*param_brightness)*duty/100));
     
-    for(i=0;i<6;i++){
-//        disp_duty[i] = duty;
-//        disp_duty[i] = 100;
-    }
 }
 
 //---- GPIO割り込み(1PPS) ----
@@ -566,12 +579,32 @@ void core1_entry(){
                 disp_num[4] = setting_num%10 + 0x10;
 
                 switch(setting_num){
-                    // 切り替え
                     case 1:
+                        // Switching mode setting
                         disp_num[3] = 10;   // 消灯
                         disp_num[2] = 10;   // 消灯
                         disp_num[1] = 10;   // 消灯
                         disp_num[0] = switch_mode;
+                        break;
+                    case 2:
+                        // brightness setting
+                        disp_num[3] = 10;   // 消灯
+                        disp_num[2] = 10;   // 消灯
+                        disp_num[1] = 10;   // 消灯
+                        disp_num[0] = param_brightness;            
+                        break;
+                    case 3:
+                        // brightness auto on/off
+                        disp_num[3] = 10;   // 消灯
+                        disp_num[2] = 10;   // 消灯
+                        disp_num[1] = 10;   // 消灯
+                        disp_num[0] = param_brightness_auto;            
+                        break;
+                    default:
+                        disp_num[3] = 10;   // 消灯
+                        disp_num[2] = 10;   // 消灯
+                        disp_num[1] = 10;   // 消灯
+                        disp_num[0] = 0;
                 }
                 
                 for(i=0;i<6;i++){
@@ -746,9 +779,54 @@ int main(){
 
                         switch(setting_num){
                             case 1:
+                                // Switching mode 
                                 switch_mode = (SwitchMode)((uint8_t)switch_mode + 1);
                                 if(switch_mode==5) switch_mode = normal;
                                 break;
+                            case 2:
+                                // Brightness setting
+                                param_brightness++;
+                                if(param_brightness==10) param_brightness=0;
+                                break;
+                            case 3:
+                                // Brightness auto setting
+                                if(param_brightness_auto==0){
+                                    param_brightness_auto=1;
+                                }else{
+                                    param_brightness_auto=0;
+                                }
+                                break;
+                            case 4:
+                                // Auto on/off setting
+
+                                break;
+                            case 5:
+                                // Auto on time
+
+                                break;
+                            case 6:
+                                // Auto off time
+
+                                break;
+                            case 7:
+                                // Jetlag setting 
+
+                                break;
+                            case 8:
+                                // GPS time correction on/off
+
+                                break;
+                            case 9:
+                                // LED setting
+                                
+                                break;
+                            case 10:
+                                // 1/f fraction setting
+
+                                break;
+                            default:
+                                break;
+
                         }
                         break;
                 }
@@ -777,7 +855,10 @@ int main(){
 
                         break;
                     case settings:
-
+                        setting_num++;
+                        if(setting_num > SETTING_MAX_NUM){
+                            setting_num = 1;
+                        }
                         break;
                 }
             }
@@ -1220,3 +1301,31 @@ bool task_add(func_ptr func, uint16_t delay_10ms){
 void pps_led_off(void){
     gpio_put(PPSLED_PIN, 0);
 }
+/*
+//---- pink filter -----------------------
+void init_pink(void) {
+    extern float   z[MAX_Z];
+    extern float   k[MAX_Z];
+    int             i;
+
+    for (i = 0; i < MAX_Z; i++)
+        z[i] = 0;
+    k[MAX_Z - 1] = 0.5;
+    for (i = MAX_Z - 1; i > 0; i--)
+        k[i - 1] = k[i] * 0.25;
+}
+
+float pinkfilter(float in) {
+    extern float   z[MAX_Z];
+    extern float   k[MAX_Z];
+    static float   t = 0.0;
+    float          q;
+    int             i;
+
+    q = in;
+    for (i = 0; i < MAX_Z; i++) {
+        z[i] = (q * k[i] + z[i] * (1.0 - k[i]));
+        q = (q + z[i]) * 0.5;
+    }
+    return (t = 0.75 * q + 0.25 * t); 
+} */
