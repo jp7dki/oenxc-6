@@ -11,6 +11,7 @@
 //-------------------------------------------------------
 #include <stdio.h>
 #include <stdlib.h>
+#include "nixie_clock.hpp"
 #include "pico/stdlib.h"
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
@@ -32,15 +33,15 @@
 //-------------------------------------------------------
 //- Macro Define 
 //-------------------------------------------------------
+
+
 // UART0(DEBUG) 
-#define UART_DEBUG uart0
 #define BAUD_RATE 115200
 #define DATA_BITS 8
 #define STOP_BITS 1
 #define PARITY UART_PARITY_NONE
 
 // UART1(GPS)
-#define UART_GPS uart1
 #define BAUD_RATE_GPS 9600
 
 #define NUM_TASK 10
@@ -52,43 +53,8 @@
 //-------------------------------------------------------
 //- Global Variable
 //-------------------------------------------------------
-const uint8_t version[6] = {0,0,0,1+0x10,0,0};
-const uint KR_PIN = 0;
-const uint KL_PIN = 1;
-const uint K9_PIN = 2;
-const uint K8_PIN = 3;
-const uint K7_PIN = 4;
-const uint K6_PIN = 5;
-const uint K5_PIN = 6;
-const uint K4_PIN = 7;
-const uint K3_PIN = 8;
-const uint K2_PIN = 9;
-const uint K1_PIN = 10;
-const uint K0_PIN = 11;
-const uint DBG_TX_PIN = 12;
-const uint DBG_RX_PIN = 13;
-const uint VCONT_PIN = 14;
-const uint DIGIT6_PIN = 15;
-const uint DIGIT2_PIN = 16;
-const uint DIGIT3_PIN = 17;
-const uint DIGIT4_PIN = 18;
-const uint DIGIT5_PIN = 19;
-const uint PPS_PIN = 20;
-const uint GPS_TX_PIN = 21;
-const uint DIGIT1_PIN = 22;
-const uint SWA_PIN = 23;
-const uint SWB_PIN = 24;
-const uint SWC_PIN = 25;
-const uint DBGLED_PIN = 26;
-const uint PPSLED_PIN = 27;
-const uint HVEN_PIN = 28;
-const uint LSENSOR_PIN = 29;
-
 uint8_t count;
 
-uint8_t disp_num[6];
-uint8_t disp_next[6];
-uint8_t disp_change[6];
 uint8_t disp_duty[6];
 
 uint16_t rx_counter;
@@ -97,8 +63,8 @@ uint8_t gps_time[16];
 uint8_t gps_date[16];
 uint8_t gps_valid=0;
 bool flg_time_correct=false;
+bool flg_time_update=false;
 bool flg_change=false;
-uint16_t switch_counter=0;
 const uint8_t GPS_HEADER[7] = {'$','G','P','R','M','C',','};
 
 uint16_t pps_led_counter=0;
@@ -106,9 +72,15 @@ uint16_t blink_counter[6] = {0,0,0,0,0,0};
 uint8_t cursor;
 uint8_t setting_num=1;
 // setting parameters
-uint8_t param_brightness = 5;
-uint8_t param_brightness_auto = 1;
+uint8_t param_auto_onoff = 0;
+uint8_t param_off_time_hour = 7;       // default off time = 22:00
+uint8_t param_off_time_min = 16;
+uint8_t param_on_time_hour = 6;         // defualt on time = 6:00
+uint8_t param_on_time_min = 0;
 uint16_t fluctuation_level=0;
+
+bool flg_off = true;
+bool flg_on = true;
 
 // task list of delay execution.
 typedef void (*func_ptr)(void);
@@ -123,7 +95,7 @@ enum SwitchMode{
     crossfade,
     cloud,
     dotmove
-} switch_mode;
+};
 
 enum OperationMode{
     power_on,
@@ -132,14 +104,16 @@ enum OperationMode{
     settings,
     time_adjust,
     random_disp,
-    demo
+    demo,
+    onoff_animation
 } operation_mode;
+
+NixieTube nixie_tube;
 
 //-------------------------------------------------------
 //- Function Prototyping
 //-------------------------------------------------------
 void hardware_init(void);
-void disp_nixie(uint num, uint digit);
 void delay_execution(void (*func_ptr)(void), uint16_t delay_ms);
 void gps_receive(char char_recv);
 
@@ -163,68 +137,25 @@ static void timer_alarm0_irq(void) {
     uint64_t target = timer_hw->timerawl + 999999; // interval 1s
     timer_hw->alarm[0] = (uint32_t)target;
 
-    if(operation_mode==clock_display){
-        if(flg_time_correct==false){
-            rtc_get_datetime(&time);
 
-            switch(switch_mode){
-                case normal:
-                    // normal
-                    disp_num[0] = time.sec%10;
-                    disp_num[1] = time.sec/10;
-                    disp_num[2] = time.min%10;
-                    disp_num[3] = time.min/10;
-                    disp_num[4] = time.hour%10;
-                    disp_num[5] = time.hour/10;
-                    break;
-                case fade:
-                case crossfade:
-                    // cross-fade
-                    disp_next[0] = time.sec%10;
-                    disp_next[1] = time.sec/10;
-                    disp_next[2] = time.min%10;
-                    disp_next[3] = time.min/10;
-                    disp_next[4] = time.hour%10;
-                    disp_next[5] = time.hour/10;  
-                    flg_change=true;
-                    switch_counter=0;
-                    break;
-                case cloud:
-                    // cloud
-                    for(i=0;i<6;i++){
-                        disp_next[i] = disp_num[i];
-                    }
-                    disp_num[0] = time.sec%10;
-                    disp_num[1] = time.sec/10;
-                    disp_num[2] = time.min%10;
-                    disp_num[3] = time.min/10;
-                    disp_num[4] = time.hour%10;
-                    disp_num[5] = time.hour/10; 
-
-                    // 数値が変わった桁はdisp_nextを1にする。
-                    for(i=0;i<6;i++){
-                        if(disp_next[i]==disp_num[i]){
-                            disp_change[i]=0;
-                        }else{
-                            disp_change[i]=1;
-                        }
-                    }
-                    flg_change=true;
-                    switch_counter=0;
-                    break;
-                case dotmove:     
-                    // dot-move 
-                    disp_num[0] = time.sec%10;
-                    disp_num[1] = time.sec/10;
-                    disp_num[2] = time.min%10;
-                    disp_num[3] = time.min/10;
-                    disp_num[4] = time.hour%10;
-                    disp_num[5] = time.hour/10; 
-                    flg_change=true;
-                    switch_counter=0;
-
-            }
+    // 毎分0秒に消灯・点灯の確認をする
+    if((time.sec==0) && (param_auto_onoff==1)){
+        if((time.hour==param_off_time_hour) && (time.min==param_off_time_min)){
+            // 自動消灯
+            flg_off = true;
+            operation_mode = onoff_animation;
         }
+
+        if((time.hour==param_on_time_hour) && (time.min==param_on_time_min)){
+            // 自動点灯
+            flg_on = true;
+            operation_mode = onoff_animation;
+        }
+    }
+
+    if(operation_mode==clock_display){
+        rtc_get_datetime(&time);
+        nixie_tube.clock_tick(time);
     }
 }
 
@@ -262,131 +193,11 @@ static void timer_alerm1_irq(void) {
         }
     }
 
-    //---- Switch Mode -----------------------
-    switch(switch_mode){
-        case normal:
-            break;
+    rtc_get_datetime(&time);
+    nixie_tube.switch_update(time);
 
-        case fade:
-        case crossfade:
-            if(flg_change){
-                if(switch_counter!=20){
-                    switch_counter++;
-                }else{
-                    for(i=0;i<6;i++){
-                        disp_num[i] = disp_next[i];
-                    }
-                    flg_change=false;
-                }
-            }
-            break;
-        case cloud:
-            if(flg_change){
-                if(switch_counter!=20){
-                    if((switch_counter%4)==0){
-                        for(i=0;i<6;i++){
-                            if(disp_change[i]==1){
-                                disp_num[i]=(disp_num[i]+(switch_counter/4))%10;
-                            }
-                        }
-                    }
-                    switch_counter++;
-                }else{
-                    flg_change=false;
-                    
-                    rtc_get_datetime(&time);
-                    disp_num[0] = time.sec%10;
-                    disp_num[1] = time.sec/10;
-                    disp_num[2] = time.min%10;
-                    disp_num[3] = time.min/10;
-                    disp_num[4] = time.hour%10;
-                    disp_num[5] = time.hour/10; 
-                }
-            }
-            break;
-        case dotmove:
-            if(flg_change){
-                if(switch_counter<97){
-                    switch_counter++;
-
-                    if((switch_counter%4)==1){
-                        for(i=0;i<6;i++){
-                            disp_num[i] &= 0x0F;
-                        }
-                        switch(switch_counter/4){
-                            case 0:
-                            case 23:
-                                disp_num[0] |= 0x10;
-                                break;
-                            case 1:
-                            case 22:
-                                disp_num[0] |= 0x20;
-                                break;
-                            case 2:
-                            case 21:
-                                disp_num[1] |= 0x10;
-                                break;
-                            case 3:
-                            case 20:
-                                disp_num[1] |= 0x20;
-                                break;
-                            case 4:
-                            case 19:
-                                disp_num[2] |= 0x10;
-                                break;
-                            case 5:
-                            case 18:
-                                disp_num[2] |= 0x20;
-                                break;
-                            case 6:
-                            case 17:
-                                disp_num[3] |= 0x10;
-                                break;
-                            case 7:
-                            case 16:
-                                disp_num[3] |= 0x20;
-                                break;
-                            case 8:
-                            case 15:
-                                disp_num[4] |= 0x10;
-                                break;
-                            case 9:
-                            case 14:
-                                disp_num[4] |= 0x20;
-                                break;
-                            case 10:
-                            case 13:
-                                disp_num[5] |= 0x10;
-                                break;
-                            case 11:
-                            case 12:
-                                disp_num[5] |= 0x20;
-                                break;
-                        }
-                    }
-
-                }else{
-                    switch_counter=0;
-                    flg_change=false;
-                }
-            }
-    }
-
-    //---- light sensor -------------------
-    uint8_t duty;
-    if(param_brightness_auto==1){
-        uint32_t result = adc_read();
-        duty = result*100/3000;
-        if(duty > 100) duty=100;
-        if(duty <20) duty=20;
-    }else{
-        duty = 100;
-    }
-
-
-    uint slice_num0 = pwm_gpio_to_slice_num(VCONT_PIN);
-    pwm_set_chan_level(slice_num0, PWM_CHAN_A, ((1000+160*param_brightness)*duty/100));
-    
+    // Nixie-Tube brightness(anode current) update
+    nixie_tube.brightness_update();
 }
 
 //---- GPIO割り込み(1PPS) ----
@@ -394,70 +205,14 @@ void gpio_callback(uint gpio, uint32_t event){
     datetime_t time;
     uint8_t i;
 
+    if(flg_time_correct==false){
+        uint64_t target = timer_hw->timerawl + 1000000; // interval 1s
+        timer_hw->alarm[0] = (uint32_t)target;
+        flg_time_correct=true;
+        flg_time_update=true;
+    }
+
     if(operation_mode==clock_display){
-        // Display time update
-        rtc_get_datetime(&time);
-        switch(switch_mode){
-            case normal:
-                // normal switch
-                disp_num[0] = time.sec%10;
-                disp_num[1] = time.sec/10;
-                disp_num[2] = time.min%10;
-                disp_num[3] = time.min/10;
-                disp_num[4] = time.hour%10;
-                disp_num[5] = time.hour/10; 
-                flg_change=true;
-                break;
-            
-            case fade:
-            case crossfade:
-                // crossfade switch
-                disp_next[0] = time.sec%10;
-                disp_next[1] = time.sec/10;
-                disp_next[2] = time.min%10;
-                disp_next[3] = time.min/10;
-                disp_next[4] = time.hour%10;
-                disp_next[5] = time.hour/10;  
-                flg_change=true;
-                switch_counter=0;
-                break;
-
-            case cloud:
-                // cloud(pata-pata) switch
-                for(i=0;i<6;i++){
-                    disp_next[i] = disp_num[i];
-                }
-                disp_num[0] = time.sec%10;
-                disp_num[1] = time.sec/10;
-                disp_num[2] = time.min%10;
-                disp_num[3] = time.min/10;
-                disp_num[4] = time.hour%10;
-                disp_num[5] = time.hour/10; 
-
-                // 数値が変わった桁はdisp_changeを1にする。
-                for(i=0;i<6;i++){
-                    if(disp_next[i]==disp_num[i]){
-                        disp_change[i]=0;
-                    }else{
-                        disp_change[i]=1;
-                    }
-                }
-                flg_change=true;
-                switch_counter=0;
-                break;
-
-            case dotmove:
-                // dot-move 
-                disp_num[0] = time.sec%10;
-                disp_num[1] = time.sec/10;
-                disp_num[2] = time.min%10;
-                disp_num[3] = time.min/10;
-                disp_num[4] = time.hour%10;
-                disp_num[5] = time.hour/10; 
-                flg_change=true;
-                switch_counter=0;
-        }
-
         // 1PPS_LED ON (200ms)
         gpio_put(PPSLED_PIN, 1);
         task_add(pps_led_off, 20);
@@ -469,8 +224,6 @@ void gpio_callback(uint gpio, uint32_t event){
 void on_uart_rx(){
     int i;
     uint8_t ch;
-
-    uart_putc(UART_DEBUG, ch);
 
     // GPSの受信処理 GPRMCのみ処理する
     while(uart_is_readable(UART_GPS)){
@@ -492,131 +245,23 @@ void core1_entry(){
 
             // Power up animation
             case power_up_animation:
-                for(i=0;i<6;i++){
-                    // 通常の切り替え
-                    disp_nixie(disp_num[i],i);
-                    sleep_us(20*disp_duty[i]);
+            case onoff_animation:
 
-                    disp_nixie(10,6); // blank time
-                    sleep_us(20*(100-disp_duty[i]));
-
-                    sleep_us(150);
-                }
+                nixie_tube.dynamic_display_task();
                 break;
 
 
             // Clock display
             case clock_display:
-                for(i=0;i<6;i++){
-                    // Switch Mode毎の処理
-                    switch(switch_mode){
-                        case normal:
-                            // 通常の切り替え
-                            disp_nixie(disp_num[i],i);
-                            sleep_us(20*disp_duty[i]);
-                            break;
 
-                        case fade:
-                            // フェード
-                            if(flg_change && (disp_num[i]!=disp_next[i])){
-                                if(switch_counter<10){
-                                    disp_nixie(disp_num[i],i);
-                                    sleep_us(1*disp_duty[i]*(20-2*switch_counter));
-
-                                    disp_nixie(10,6);          // nixie off
-                                    sleep_us(1*disp_duty[i]*2*switch_counter);
-                                }else{
-                                    disp_nixie(disp_next[i],i);
-                                    sleep_us(1*disp_duty[i]*(2*(switch_counter-10)));
-
-                                    disp_nixie(10,6);          // nixie off
-                                    sleep_us(1*disp_duty[i]*2*(20-switch_counter));
-                                }
-                            }else{
-                                disp_nixie(disp_num[i],i);
-                                sleep_us(20*disp_duty[i]); 
-                            }
-                            break;
-                        case crossfade:
-                            // クロスフェード
-                            if(flg_change){
-                                disp_nixie(disp_num[i],i);
-                                sleep_us(1*disp_duty[i]*(20-switch_counter));
-
-                                disp_nixie(disp_next[i],i);
-                                sleep_us(1*disp_duty[i]*switch_counter);
-                            }else{
-                                disp_nixie(disp_num[i],i);
-                                sleep_us(20*disp_duty[i]);                        
-                            }
-                            break;
-                        case cloud:
-                            // クラウド(パタパタ)
-                            disp_nixie(disp_num[i],i);
-                            sleep_us(20*disp_duty[i]);
-                            break;
-                        case dotmove:
-                            // ドットムーヴ
-                            disp_nixie(disp_num[i],i);
-                            sleep_us(20*disp_duty[i]);
-                    }
-
-                    disp_nixie(10,6); // blank time
-                    sleep_us(20*(100-disp_duty[i]));
-
-                    sleep_us(150);
-                }
+                nixie_tube.dynamic_clock_task();
                 break;
             
+            // Setting display
             case settings:
 
-                // 番号の表示
-                if(setting_num>9){
-                    disp_num[5] = setting_num/10;
-                }else{
-                    disp_num[5] = 10;       // 消灯
-                }
-                disp_num[4] = setting_num%10 + 0x10;
-
-                switch(setting_num){
-                    case 1:
-                        // Switching mode setting
-                        disp_num[3] = 10;   // 消灯
-                        disp_num[2] = 10;   // 消灯
-                        disp_num[1] = 10;   // 消灯
-                        disp_num[0] = switch_mode;
-                        break;
-                    case 2:
-                        // brightness setting
-                        disp_num[3] = 10;   // 消灯
-                        disp_num[2] = 10;   // 消灯
-                        disp_num[1] = 10;   // 消灯
-                        disp_num[0] = param_brightness;            
-                        break;
-                    case 3:
-                        // brightness auto on/off
-                        disp_num[3] = 10;   // 消灯
-                        disp_num[2] = 10;   // 消灯
-                        disp_num[1] = 10;   // 消灯
-                        disp_num[0] = param_brightness_auto;            
-                        break;
-                    default:
-                        disp_num[3] = 10;   // 消灯
-                        disp_num[2] = 10;   // 消灯
-                        disp_num[1] = 10;   // 消灯
-                        disp_num[0] = 0;
-                }
-                
-                for(i=0;i<6;i++){
-                    // 通常の切り替え
-                    disp_nixie(disp_num[i],i);
-                    sleep_us(20*disp_duty[i]);
-
-                    disp_nixie(10,6); // blank time
-                    sleep_us(20*(100-disp_duty[i]));
-
-                    sleep_us(150);
-                }
+                nixie_tube.dynamic_setting_task(setting_num);
+                break;
 
             defalut:
                 break;    
@@ -634,6 +279,7 @@ int main(){
     uint16_t i,j;
     uint16_t count_sw;
     datetime_t time;
+    uint64_t target;
 
     // task initialization
     for(i=0;i<NUM_TASK;i++){
@@ -641,7 +287,6 @@ int main(){
     }
 
     // mode initialization
-    switch_mode = fade;
     operation_mode = clock_display;
 
     bi_decl(bi_program_description("This is a test program for nixie6."));
@@ -652,7 +297,7 @@ int main(){
     hw_set_bits(&timer_hw->inte, 1u<<0);        // Alarm0
     irq_set_exclusive_handler(TIMER_IRQ_0, timer_alarm0_irq);
     irq_set_enabled(TIMER_IRQ_0, true);
-    uint64_t target = timer_hw->timerawl + 1000000; // interval 1s
+    target = timer_hw->timerawl + 1000000; // interval 1s
     timer_hw->alarm[0] = (uint32_t)target;
 
     hw_set_bits(&timer_hw->inte, 1u<<1);        // Alarm1
@@ -660,13 +305,6 @@ int main(){
     irq_set_enabled(TIMER_IRQ_1, true);
     target = timer_hw->timerawl + 10000;   // interval 10ms
     timer_hw->alarm[1] = (uint32_t)target;
-
-    // display number reset
-    for(i=0;i<6;i++){
-        disp_num[i]=10;     // display off  
-        disp_duty[i]=100;
-        disp_next[i]=0;
-    }
 
     count = 0;
 
@@ -679,49 +317,24 @@ int main(){
     // Power-Up-Animation
     operation_mode = power_up_animation;
     
-    // number all number check
-    sleep_ms(500);
-
-    for(i=0;i<6;i++){
-        disp_duty[i]=0;
-        disp_num[i]=0;
-    }
-
-    for(i=0;i<100;i++){
-        for(j=0;j<6;j++){
-            disp_duty[j]++;
-        }
-        sleep_ms(8);
-    }
-
-    for(i=0;i<10;i++){
-        for(j=0;j<6;j++){
-            disp_num[j]=i;
-        }
-        sleep_ms(300);
-    }
-
-    // random number -> firmware version
-    rtc_get_datetime(&time);
-    srand(time.month+time.day+time.hour+time.min+time.sec);
-    for(j=0;j<(6*40+100);j++){
-        for(i=0;i<6;i++){
-            if(j<(i*20)){
-                disp_num[i] = disp_num[i];
-            }else if(j<((i*40)+100)){
-                disp_num[i] = (uint8_t)(rand()%10)+0x30;
-            }else{
-                disp_num[i] = version[i];
-            }
-        }
-        sleep_ms(5);
-    }
-    sleep_ms(500);
+    nixie_tube.startup_animation();
 
     // Clock Display mode
     operation_mode = clock_display;
 
     while (1) {
+        if(operation_mode==onoff_animation){
+            if(flg_off){
+                // off_animation
+                nixie_tube.dispoff_animation();
+                flg_off = false;
+            }
+
+            if(flg_on){
+
+            }
+        }
+
         //---- SWA -----------------------
         if(!gpio_get(SWA_PIN)){
             count_sw = 0;
@@ -780,20 +393,18 @@ int main(){
                         switch(setting_num){
                             case 1:
                                 // Switching mode 
-                                switch_mode = (SwitchMode)((uint8_t)switch_mode + 1);
-                                if(switch_mode==5) switch_mode = normal;
+                                nixie_tube.switch_mode_inc();
                                 break;
                             case 2:
                                 // Brightness setting
-                                param_brightness++;
-                                if(param_brightness==10) param_brightness=0;
+                                nixie_tube.brightness_inc();
                                 break;
                             case 3:
                                 // Brightness auto setting
-                                if(param_brightness_auto==0){
-                                    param_brightness_auto=1;
+                                if(nixie_tube.brightness_auto==0){
+                                    nixie_tube.brightness_auto=1;
                                 }else{
-                                    param_brightness_auto=0;
+                                    nixie_tube.brightness_auto=0;
                                 }
                                 break;
                             case 4:
@@ -875,44 +486,6 @@ int main(){
 //-------------------------------------------------
 void hardware_init(void)
 {   
-    //---- GPIO -----------------
-    gpio_init(KR_PIN);
-    gpio_init(KL_PIN);
-    gpio_init(K9_PIN);
-    gpio_init(K8_PIN);
-    gpio_init(K7_PIN);
-    gpio_init(K6_PIN);
-    gpio_init(K5_PIN);
-    gpio_init(K4_PIN);
-    gpio_init(K3_PIN);
-    gpio_init(K2_PIN);
-    gpio_init(K1_PIN);
-    gpio_init(K0_PIN);
-    gpio_set_dir(KR_PIN, GPIO_OUT);
-    gpio_set_dir(KL_PIN, GPIO_OUT);
-    gpio_set_dir(K9_PIN, GPIO_OUT);
-    gpio_set_dir(K8_PIN, GPIO_OUT);
-    gpio_set_dir(K7_PIN, GPIO_OUT);
-    gpio_set_dir(K6_PIN, GPIO_OUT);
-    gpio_set_dir(K5_PIN, GPIO_OUT);
-    gpio_set_dir(K4_PIN, GPIO_OUT);
-    gpio_set_dir(K3_PIN, GPIO_OUT);
-    gpio_set_dir(K2_PIN, GPIO_OUT);
-    gpio_set_dir(K1_PIN, GPIO_OUT);
-    gpio_set_dir(K0_PIN, GPIO_OUT);
-    gpio_put(KR_PIN,0);
-    gpio_put(KL_PIN,0);
-    gpio_put(K9_PIN,0);
-    gpio_put(K8_PIN,0);
-    gpio_put(K7_PIN,0);
-    gpio_put(K6_PIN,0);
-    gpio_put(K5_PIN,0);
-    gpio_put(K4_PIN,0);
-    gpio_put(K3_PIN,0);
-    gpio_put(K2_PIN,0);
-    gpio_put(K1_PIN,0);
-    gpio_put(K0_PIN,0);
-
     gpio_init(DBG_TX_PIN);
     gpio_init(DBG_RX_PIN);
     gpio_set_dir(DBG_TX_PIN, GPIO_OUT);
@@ -920,11 +493,6 @@ void hardware_init(void)
     gpio_put(DBG_TX_PIN,0);
     gpio_set_function(DBG_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(DBG_RX_PIN, GPIO_FUNC_UART);
-
-    gpio_init(VCONT_PIN);
-    gpio_set_dir(VCONT_PIN, GPIO_OUT);
-    gpio_put(VCONT_PIN,0);
-    gpio_set_function(VCONT_PIN, GPIO_FUNC_PWM);
 
     gpio_init(DIGIT1_PIN);
     gpio_init(DIGIT2_PIN);
@@ -968,19 +536,6 @@ void hardware_init(void)
     gpio_put(DBGLED_PIN,0);
     gpio_put(PPSLED_PIN,0);
 
-    gpio_init(HVEN_PIN);
-    gpio_set_dir(HVEN_PIN, GPIO_OUT);
-    gpio_put(HVEN_PIN,1);
-
-    gpio_init(LSENSOR_PIN);
-    gpio_set_dir(LSENSOR_PIN, GPIO_IN);
-
-    //---- PWM -----------------
-    uint slice_num0 = pwm_gpio_to_slice_num(VCONT_PIN);
-    pwm_set_wrap(slice_num0, 3000);
-    pwm_set_chan_level(slice_num0, PWM_CHAN_A, 1800);
-    pwm_set_enabled(slice_num0, true);
-
     //---- UART ----------------
     // UART INIT(Debug)
     uart_init(UART_DEBUG, 2400);
@@ -1001,11 +556,6 @@ void hardware_init(void)
     uart_set_irq_enables(UART_GPS, true, false);
     irq_set_exclusive_handler(UART_IRQ, on_uart_rx);
     irq_set_enabled(UART_IRQ, true);
-
-    //---- ADC ------------------
-    adc_init();
-    adc_gpio_init(LSENSOR_PIN);
-    adc_select_input(3);
 
     //---- RTC ------------------
     datetime_t t = {
@@ -1031,103 +581,9 @@ void hardware_init(void)
         .min = -1,
         .sec = 01
     };
-//    rtc_set_alarm(&alarm, alarm_callback);
-    
-    
-    
+//    rtc_set_alarm(&alarm, alarm_callback);    
 }
 
-void disp_nixie(uint num, uint digit){
-
-    // all Cathode OFF
-    gpio_put(KR_PIN,0);
-    gpio_put(KL_PIN,0);
-    gpio_put(K9_PIN,0);
-    gpio_put(K8_PIN,0);
-    gpio_put(K7_PIN,0);
-    gpio_put(K6_PIN,0);
-    gpio_put(K5_PIN,0);
-    gpio_put(K4_PIN,0);
-    gpio_put(K3_PIN,0);
-    gpio_put(K2_PIN,0);
-    gpio_put(K1_PIN,0);
-    gpio_put(K0_PIN,0);
-
-    // all Anode OFF
-    gpio_put(DIGIT1_PIN,0);
-    gpio_put(DIGIT2_PIN,0);
-    gpio_put(DIGIT3_PIN,0);
-    gpio_put(DIGIT4_PIN,0);
-    gpio_put(DIGIT5_PIN,0);
-    gpio_put(DIGIT6_PIN,0);
-
-    switch(digit){
-        case 0:
-            gpio_put(DIGIT1_PIN, 1);
-            break;
-        case 1:
-            gpio_put(DIGIT2_PIN, 1);
-            break;
-        case 2:
-            gpio_put(DIGIT3_PIN, 1);
-            break;
-        case 3:
-            gpio_put(DIGIT4_PIN, 1);
-            break;
-        case 4:
-            gpio_put(DIGIT5_PIN, 1);
-            break;
-        case 5:
-            gpio_put(DIGIT6_PIN, 1);
-            break;
-    }
-
-    switch(num&0x0F){
-        case 0:
-            gpio_put(K0_PIN,1);
-            break;
-        case 1:
-            gpio_put(K1_PIN,1);
-            break;
-        case 2:
-            gpio_put(K2_PIN,1);
-            break;
-        case 3:
-            gpio_put(K3_PIN,1);
-            break;
-        case 4:
-            gpio_put(K4_PIN,1);
-            break;
-        case 5:
-            gpio_put(K5_PIN,1);
-            break;
-        case 6:
-            gpio_put(K6_PIN,1);
-            break;
-        case 7:
-            gpio_put(K7_PIN,1);
-            break;
-        case 8:
-            gpio_put(K8_PIN,1);
-            break;
-        case 9:
-            gpio_put(K9_PIN,1);
-            break;
-    }
-
-    switch(num&0xF0){
-        case 0x10:
-            gpio_put(KR_PIN,1);
-            break;
-        case 0x20:
-            gpio_put(KL_PIN,1);
-            break;
-        case 0x30:
-            gpio_put(KR_PIN,1);
-            gpio_put(KL_PIN,1);
-            break;
-    }
-}
 
 void gps_receive(char char_recv)
 {
@@ -1233,7 +689,7 @@ void gps_receive(char char_recv)
             rx_sentence_counter++;
             rx_counter=0;
 
-            if((gps_valid=='A') && (flg_time_correct==false)){
+            if((gps_valid=='A') && (flg_time_update==true)){
                 hour = (gps_time[0]-48)*10+(gps_time[1]-48);
                 min = (gps_time[2]-48)*10+(gps_time[3]-48);
                 sec = (gps_time[4]-48)*10+(gps_time[5]-48);
@@ -1262,7 +718,7 @@ void gps_receive(char char_recv)
 
                 rtc_set_datetime(&t);
 
-                flg_time_correct=true;
+                flg_time_update=false;
             }
 
             

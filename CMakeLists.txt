@@ -9,6 +9,9 @@ pico_sdk_init()
 
 add_executable(nixiev_firmware
     main.cpp
+    nixie_clock.cpp
+    nixie_clock.hpp
+    nixie_clock_define.hpp
 )
 
 pico_enable_stdio_usb(nixiev_firmware 1)
