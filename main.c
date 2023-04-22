@@ -98,7 +98,14 @@ void hardware_init(void);
 void delay_execution(void (*func_ptr)(void), uint16_t delay_ms);
 
 bool task_add(func_ptr func, uint16_t delay_10ms);
-void pps_led_off(void);
+
+void check_button(uint8_t SW_PIN, void (*short_func)(void), void (*long_func)(void));
+void swa_short_push(void);
+void swa_long_push(void);
+void swb_short_push(void);
+void swb_long_push(void);
+void swc_short_push(void);
+void swc_long_push(void);
 /*
 void init_pink(void);
 float pinkfilter(float in);
@@ -167,7 +174,7 @@ static void timer_alerm1_irq(void) {
     if(pps_led_counter!=0){
         pps_led_counter--;
         if(pps_led_counter==0){
-            gpio_put(PPSLED_PIN, 0);
+            gps.pps_led_off();
         }
     }
 
@@ -225,7 +232,7 @@ void core1_entry(){
 }
 
 //---- on_uart_rx : GPSの受信割り込み ---------------------
-static void on_uart_rx(){
+static irq_handler_t on_uart_rx(){
     int i;
     uint8_t ch;
 
@@ -250,7 +257,7 @@ static void on_uart_rx(){
 }
 
 //---- GPIO割り込み(1PPS) ----
-static void gpio_callback(uint gpio, uint32_t event){
+static irq_handler_t gpio_callback(uint gpio, uint32_t event){
     datetime_t time;
     uint8_t i;
 
@@ -263,8 +270,8 @@ static void gpio_callback(uint gpio, uint32_t event){
 
     if(operation_mode==clock_display){
         // 1PPS_LED ON (200ms)
-        gpio_put(PPSLED_PIN, 1);
-        task_add(pps_led_off, 20);
+        gps.pps_led_on();
+        task_add(gps.pps_led_off, 20);
     }
 
 }
@@ -338,146 +345,13 @@ int main(){
         }
 
         //---- SWA -----------------------
-        if(!gpio_get(SWA_PIN)){
-            count_sw = 0;
-            sleep_ms(100);
-            while((!gpio_get(SWA_PIN)) && (count_sw<200)){
-                count_sw++;
-                sleep_ms(10);
-            }
-
-            if(count_sw==200){
-                // Long-push
-                switch(operation_mode){
-                    case clock_display:
-                        operation_mode = settings;
-                        break;
-                    case settings:
-                        operation_mode = clock_display;
-                        break;
-                }
-            }else{
-                // Short-push
-                switch(operation_mode){
-                    case clock_display:
-
-                        break;
-                    case settings:
-
-                        break;
-                }
-            }
-
-            while(!gpio_get(SWA_PIN));
-        }
-        
+        check_button(SWA_PIN, swa_short_push, swa_long_push);
 
         //---- SWB -----------------------
-        if(!gpio_get(SWB_PIN)){
-            count_sw = 0;
-            sleep_ms(100);
-            while((!gpio_get(SWB_PIN)) && (count_sw<200)){
-                count_sw++;
-                sleep_ms(10);
-            }
-
-            if(count_sw==200){
-                // Long-push
-                gpio_put(DBGLED_PIN,1);
-            }else{
-                // Short-push
-                switch(operation_mode){
-                    case clock_display:
-
-                        break;
-                    case settings:
-
-                        switch(setting_num){
-                            case 1:
-                                // Switching mode 
-                                nixie_tube.switch_mode_inc(&nixie_conf);
-                                break;
-                            case 2:
-                                // Brightness setting
-                                nixie_tube.brightness_inc(&nixie_conf);
-                                break;
-                            case 3:
-                                // Brightness auto setting
-                                if(nixie_tube.conf.brightness_auto==0){
-                                    nixie_tube.conf.brightness_auto=1;
-                                }else{
-                                    nixie_tube.conf.brightness_auto=0;
-                                }
-                                break;
-                            case 4:
-                                // Auto on/off setting
-
-                                break;
-                            case 5:
-                                // Auto on time
-
-                                break;
-                            case 6:
-                                // Auto off time
-
-                                break;
-                            case 7:
-                                // Jetlag setting 
-
-                                break;
-                            case 8:
-                                // GPS time correction on/off
-
-                                break;
-                            case 9:
-                                // LED setting
-                                
-                                break;
-                            case 10:
-                                // 1/f fraction setting
-
-                                break;
-                            default:
-                                break;
-
-                        }
-                        break;
-                }
-            }
-
-            while(!gpio_get(SWB_PIN));
-        }
-
+        check_button(SWB_PIN, swb_short_push, swb_long_push);
 
         //---- SWC -----------------------
-        if(!gpio_get(SWC_PIN)){
-            count_sw = 0;
-            sleep_ms(100);
-            while((!gpio_get(SWC_PIN)) && (count_sw<200)){
-                count_sw++;
-                sleep_ms(10);
-            }
-
-            if(count_sw==200){
-                // Long-push
-                gpio_put(DBGLED_PIN,1);
-            }else{
-                // Short-push
-                switch(operation_mode){
-                    case clock_display:
-
-                        break;
-                    case settings:
-                        setting_num++;
-                        if(setting_num > SETTING_MAX_NUM){
-                            setting_num = 1;
-                        }
-                        break;
-                }
-            }
-
-            while(!gpio_get(SWC_PIN));
-        }
+        check_button(SWC_PIN, swc_short_push, swc_long_push);
 
     }
 }
@@ -567,9 +441,132 @@ bool task_add(func_ptr func, uint16_t delay_10ms){
 
 }
 
-void pps_led_off(void){
-    gpio_put(PPSLED_PIN, 0);
+//---- switch check (only use main function) -------------
+void check_button(uint8_t SW_PIN, void (*short_func)(void), void (*long_func)(void))
+{
+    uint16_t count_sw = 0;
+
+    if(!gpio_get(SW_PIN)){
+        sleep_ms(100);
+        while((!gpio_get(SW_PIN)) && (count_sw<200)){
+            count_sw++;
+            sleep_ms(10);
+        }
+
+        if(count_sw==200){
+            // Long-push
+            long_func();
+        }else{
+            // Short-push
+            short_func();
+        }
+
+        while(!gpio_get(SW_PIN));
+    }
 }
+
+void swa_short_push(void)
+{
+    switch(operation_mode){
+        case clock_display:
+
+            break;
+        case settings:
+
+            break;
+    }
+}
+
+void swa_long_push(void)
+{
+    switch(operation_mode){
+        case clock_display:
+            operation_mode = settings;
+            break;
+        case settings:
+            operation_mode = clock_display;
+            break;
+    }
+}
+
+void swb_short_push(void)
+{
+    switch(setting_num){
+        case 1:
+            // Switching mode 
+            nixie_tube.switch_mode_inc(&nixie_conf);
+            break;
+        case 2:
+            // Brightness setting
+            nixie_tube.brightness_inc(&nixie_conf);
+            break;
+        case 3:
+            // Brightness auto setting
+            if(nixie_tube.conf.brightness_auto==0){
+                nixie_tube.conf.brightness_auto=1;
+            }else{
+                nixie_tube.conf.brightness_auto=0;
+            }
+            break;
+        case 4:
+            // Auto on/off setting
+
+            break;
+        case 5:
+            // Auto on time
+
+            break;
+        case 6:
+            // Auto off time
+
+            break;
+        case 7:
+            // Jetlag setting 
+
+            break;
+        case 8:
+            // GPS time correction on/off
+
+            break;
+        case 9:
+            // LED setting
+            
+            break;
+        case 10:
+            // 1/f fraction setting
+
+            break;
+        default:
+            break;
+
+    }
+}
+
+void swb_long_push(void)
+{
+    gpio_put(DBGLED_PIN,1);
+}
+
+void swc_short_push(void)
+{
+    switch(operation_mode){
+        case clock_display:
+
+            break;
+        case settings:
+            setting_num++;
+            if(setting_num > SETTING_MAX_NUM){
+                setting_num = 1;
+            }
+            break;
+    }
+}
+
+void swc_long_push(void)
+{
+    gpio_put(DBGLED_PIN,1);    
+}
+
 /*
 //---- pink filter -----------------------
 void init_pink(void) {

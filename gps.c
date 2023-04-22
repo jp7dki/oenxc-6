@@ -7,10 +7,19 @@ const uint8_t GPS_HEADER[7] = {'$','G','P','R','M','C',','};
 //--------------------------------------
 
 
-
 //--------------------------------------
 // public function
 //--------------------------------------
+//---- gps_pps_led_on : GPS PPS表示用LED点灯
+static void gps_pps_led_on(void){
+    gpio_put(PPSLED_PIN, 1);
+}
+
+//---- gps_pps_led_off : GPS PPS表示用LED消灯
+static void gps_pps_led_off(void){
+    gpio_put(PPSLED_PIN, 0);
+}
+
 //---- gps_receive : GPSのセンテンス処理 ------------------
 static bool gps_receive(GpsConfig *conf, char char_recv)
 {
@@ -192,8 +201,9 @@ Gps new_Gps(GpsConfig Config)
     return ((Gps){
         .conf = Config,
         .init = gps_init,
-        .receive = gps_receive
-
+        .receive = gps_receive,
+        .pps_led_on = gps_pps_led_on,
+        .pps_led_off = gps_pps_led_off
     });
 }
 

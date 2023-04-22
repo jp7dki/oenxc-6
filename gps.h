@@ -38,6 +38,8 @@ struct gps
     //---- initialization -------------
     void (*init)(GpsConfig *conf, irq_handler_t *rx_irq_callback, irq_handler_t *pps_irq_callback);
     bool (*receive)(GpsConfig *conf, char char_recv);
+    void (*pps_led_on)(void);
+    void (*pps_led_off)(void);
 };
 
 //---- constructor -------------
