@@ -11,6 +11,8 @@ add_executable(nixiev_firmware
     main.c
     nixie_clock.c
     nixie_clock.h
+    gps.c
+    gps.h
     nixie_clock_define.h
 )
 

@@ -151,6 +151,25 @@ static void nixie_init(NixieConfig *conf)
     gpio_put(K1_PIN,0);
     gpio_put(K0_PIN,0);
 
+    gpio_init(DIGIT1_PIN);
+    gpio_init(DIGIT2_PIN);
+    gpio_init(DIGIT3_PIN);
+    gpio_init(DIGIT4_PIN);
+    gpio_init(DIGIT5_PIN);
+    gpio_init(DIGIT6_PIN);
+    gpio_set_dir(DIGIT1_PIN, GPIO_OUT);
+    gpio_set_dir(DIGIT2_PIN, GPIO_OUT);
+    gpio_set_dir(DIGIT3_PIN, GPIO_OUT);
+    gpio_set_dir(DIGIT4_PIN, GPIO_OUT);
+    gpio_set_dir(DIGIT5_PIN, GPIO_OUT);
+    gpio_set_dir(DIGIT6_PIN, GPIO_OUT);
+    gpio_put(DIGIT1_PIN,0);
+    gpio_put(DIGIT2_PIN,0);
+    gpio_put(DIGIT3_PIN,0);
+    gpio_put(DIGIT4_PIN,0);
+    gpio_put(DIGIT5_PIN,0);
+    gpio_put(DIGIT6_PIN,0);
+
     //---- PWM -----------------
     gpio_init(VCONT_PIN);
     gpio_set_dir(VCONT_PIN, GPIO_OUT);

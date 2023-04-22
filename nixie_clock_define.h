@@ -42,4 +42,11 @@
 #define UART_DEBUG uart0
 #define UART_GPS uart1
 
+#define DATA_BITS 8
+#define STOP_BITS 1
+#define PARITY UART_PARITY_NONE
+
+// UART1(GPS)
+#define BAUD_RATE_GPS 9600
+
 #endif

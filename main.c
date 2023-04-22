@@ -12,11 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "nixie_clock.h"
+#include "gps.h"
 #include "pico/stdlib.h"
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
-#include "hardware/irq.h"
 #include "hardware/pwm.h"
 #include "hardware/adc.h"
 #include "hardware/spi.h"
@@ -37,12 +37,6 @@
 
 // UART0(DEBUG) 
 #define BAUD_RATE 115200
-#define DATA_BITS 8
-#define STOP_BITS 1
-#define PARITY UART_PARITY_NONE
-
-// UART1(GPS)
-#define BAUD_RATE_GPS 9600
 
 #define NUM_TASK 10
 #define SETTING_MAX_NUM 10
@@ -55,17 +49,8 @@
 //-------------------------------------------------------
 uint8_t count;
 
-uint8_t disp_duty[6];
-
-uint16_t rx_counter;
-uint16_t rx_sentence_counter;
-uint8_t gps_time[16];
-uint8_t gps_date[16];
-uint8_t gps_valid=0;
 bool flg_time_correct=false;
-bool flg_time_update=false;
-bool flg_change=false;
-const uint8_t GPS_HEADER[7] = {'$','G','P','R','M','C',','};
+bool flg_pps_received=false;
 
 uint16_t pps_led_counter=0;
 uint16_t blink_counter[6] = {0,0,0,0,0,0};
@@ -103,12 +88,14 @@ enum OperationMode{
 NixieTube nixie_tube;
 NixieConfig nixie_conf;
 
+Gps gps;
+GpsConfig gps_conf;
+
 //-------------------------------------------------------
 //- Function Prototyping
 //-------------------------------------------------------
 void hardware_init(void);
 void delay_execution(void (*func_ptr)(void), uint16_t delay_ms);
-void gps_receive(char char_recv);
 
 bool task_add(func_ptr func, uint16_t delay_10ms);
 void pps_led_off(void);
@@ -146,13 +133,13 @@ static void timer_alarm0_irq(void) {
         }
     }
 
+    rtc_get_datetime(&time);
     // 毎時0分0秒に時刻合わせを行う
     if((time.sec==0) && (time.min==0)){
         flg_time_correct = false;
     }
 
     if(operation_mode==clock_display){
-        rtc_get_datetime(&time);
         nixie_tube.clock_tick(&nixie_conf, time);
     }
 }
@@ -198,38 +185,7 @@ static void timer_alerm1_irq(void) {
     nixie_tube.brightness_update(&nixie_conf);
 }
 
-//---- GPIO割り込み(1PPS) ----
-void gpio_callback(uint gpio, uint32_t event){
-    datetime_t time;
-    uint8_t i;
 
-    if(flg_time_correct==false){
-        uint64_t target = timer_hw->timerawl + 999999; // interval 1s
-        timer_hw->alarm[0] = (uint32_t)target;
-        flg_time_correct=true;
-        flg_time_update=true;
-    }
-
-    if(operation_mode==clock_display){
-        // 1PPS_LED ON (200ms)
-        gpio_put(PPSLED_PIN, 1);
-        task_add(pps_led_off, 20);
-    }
-
-}
-
-//---- uart_rx : GPSの受信割り込み --------------------
-void on_uart_rx(){
-    int i;
-    uint8_t ch;
-
-    // GPSの受信処理 GPRMCのみ処理する
-    while(uart_is_readable(UART_GPS)){
-        ch = uart_getc(UART_GPS);
-
-        gps_receive(ch);
-    }
-}
 
 //---------------------------------------------------------
 //- core1 entry
@@ -268,6 +224,51 @@ void core1_entry(){
     }
 }
 
+//---- on_uart_rx : GPSの受信割り込み ---------------------
+static void on_uart_rx(){
+    int i;
+    uint8_t ch;
+
+    // GPSの受信処理 GPRMCのみ処理する
+    while(uart_is_readable(UART_GPS)){
+        ch = uart_getc(UART_GPS);
+
+        if(gps.receive(&gps_conf, ch)){
+            if(flg_pps_received==true){
+                // RTCをリセットしておく
+                reset_block(RESETS_RESET_RTC_BITS);
+                unreset_block_wait(RESETS_RESET_RTC_BITS);
+                rtc_init();
+
+                datetime_t t = gps_conf.gps_datetime;
+
+                rtc_set_datetime(&t);
+                flg_pps_received=false;
+            }
+        }
+    }
+}
+
+//---- GPIO割り込み(1PPS) ----
+static void gpio_callback(uint gpio, uint32_t event){
+    datetime_t time;
+    uint8_t i;
+
+    if(flg_time_correct==false){
+        uint64_t target = timer_hw->timerawl + 999999; // interval 1s
+        timer_hw->alarm[0] = (uint32_t)target;
+        flg_time_correct=true;
+        flg_pps_received=true;
+    }
+
+    if(operation_mode==clock_display){
+        // 1PPS_LED ON (200ms)
+        gpio_put(PPSLED_PIN, 1);
+        task_add(pps_led_off, 20);
+    }
+
+}
+
 //---------------------------------------------------------
 //- main function
 //---------------------------------------------------------
@@ -294,6 +295,9 @@ int main(){
     nixie_tube = new_NixieTube(nixie_conf);
     nixie_tube.init(&nixie_conf);
 
+    gps = new_Gps(gps_conf);
+    gps.init(&gps_conf, on_uart_rx, gpio_callback);
+
     // Timer Settings
     hw_set_bits(&timer_hw->inte, 1u<<0);        // Alarm0
     irq_set_exclusive_handler(TIMER_IRQ_0, timer_alarm0_irq);
@@ -311,9 +315,6 @@ int main(){
 
     // Core1 Task 
     multicore_launch_core1(core1_entry);
-
-    // GPIO interrupt setting(1PPS)
-    gpio_set_irq_enabled_with_callback(PPS_PIN, GPIO_IRQ_EDGE_RISE, true, &gpio_callback);
 
     // Power-Up-Animation
     operation_mode = power_up_animation;
@@ -495,31 +496,6 @@ void hardware_init(void)
     gpio_set_function(DBG_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(DBG_RX_PIN, GPIO_FUNC_UART);
 
-    gpio_init(DIGIT1_PIN);
-    gpio_init(DIGIT2_PIN);
-    gpio_init(DIGIT3_PIN);
-    gpio_init(DIGIT4_PIN);
-    gpio_init(DIGIT5_PIN);
-    gpio_init(DIGIT6_PIN);
-    gpio_set_dir(DIGIT1_PIN, GPIO_OUT);
-    gpio_set_dir(DIGIT2_PIN, GPIO_OUT);
-    gpio_set_dir(DIGIT3_PIN, GPIO_OUT);
-    gpio_set_dir(DIGIT4_PIN, GPIO_OUT);
-    gpio_set_dir(DIGIT5_PIN, GPIO_OUT);
-    gpio_set_dir(DIGIT6_PIN, GPIO_OUT);
-    gpio_put(DIGIT1_PIN,0);
-    gpio_put(DIGIT2_PIN,0);
-    gpio_put(DIGIT3_PIN,0);
-    gpio_put(DIGIT4_PIN,0);
-    gpio_put(DIGIT5_PIN,0);
-    gpio_put(DIGIT6_PIN,0);
-
-    gpio_init(PPS_PIN);
-    gpio_init(GPS_TX_PIN);
-    gpio_set_dir(PPS_PIN, GPIO_IN);
-    gpio_set_dir(GPS_TX_PIN, GPIO_IN);
-    gpio_set_function(GPS_TX_PIN, GPIO_FUNC_UART);
-
     gpio_init(SWA_PIN);
     gpio_init(SWB_PIN);
     gpio_init(SWC_PIN);
@@ -531,11 +507,8 @@ void hardware_init(void)
     gpio_pull_up(SWC_PIN);
 
     gpio_init(DBGLED_PIN);
-    gpio_init(PPSLED_PIN);
     gpio_set_dir(DBGLED_PIN, GPIO_OUT);
-    gpio_set_dir(PPSLED_PIN, GPIO_OUT);
     gpio_put(DBGLED_PIN,0);
-    gpio_put(PPSLED_PIN,0);
 
     //---- UART ----------------
     // UART INIT(Debug)
@@ -545,18 +518,6 @@ void hardware_init(void)
     uart_set_format(UART_DEBUG, DATA_BITS, STOP_BITS, PARITY);
     uart_set_fifo_enabled(UART_DEBUG, false);
     uart_set_irq_enables(UART_DEBUG, false, false);
-
-    // UART INIT(GPS)
-    uart_init(UART_GPS, 9600);
-    int __unused actual1 = uart_set_baudrate(UART_GPS, BAUD_RATE_GPS);
-    uart_set_hw_flow(UART_GPS, false, false);
-    uart_set_format(UART_GPS, DATA_BITS, STOP_BITS, PARITY);
-    uart_set_fifo_enabled(UART_GPS, false);
-    int UART_IRQ = UART_GPS == uart0 ? UART0_IRQ : UART1_IRQ;
-
-    uart_set_irq_enables(UART_GPS, true, false);
-    irq_set_exclusive_handler(UART_IRQ, on_uart_rx);
-    irq_set_enabled(UART_IRQ, true);
 
     //---- RTC ------------------
     datetime_t t = {
@@ -583,155 +544,6 @@ void hardware_init(void)
         .sec = 01
     };
 //    rtc_set_alarm(&alarm, alarm_callback);    
-}
-
-
-void gps_receive(char char_recv)
-{
-    uint8_t hour,min,sec;
-
-    switch(rx_sentence_counter){
-    case 0:
-        // $GPRMC待ち
-        if(GPS_HEADER[rx_counter]==char_recv){
-            rx_counter++;
-        }else{
-            rx_counter=0;
-        }
-
-        if(rx_counter==7){
-            rx_sentence_counter++;
-            rx_counter=0;
-        }
-        break;
-    case 1:
-        // 時刻取得
-        if(char_recv==','){
-            rx_sentence_counter++;
-            rx_counter=0;
-        }else{
-            gps_time[rx_counter]=char_recv;
-            rx_counter++;
-        }
-        break;
-    case 2:
-        // Status取得
-        if(char_recv==','){
-            rx_sentence_counter++;
-            rx_counter=0;
-        }else{
-            gps_valid=char_recv;
-            rx_counter++;
-        }
-        break;
-    case 3:
-        // 緯度
-        if(char_recv==','){
-            rx_sentence_counter++;
-            rx_counter=0;
-        }else{
-            // 読み捨て
-            rx_counter++;
-        }
-        break;
-    case 4:
-        // 北緯or南緯
-        if(char_recv==','){
-            rx_sentence_counter++;
-            rx_counter=0;
-        }else{
-            // 読み捨て
-            rx_counter++;
-        }
-        break;
-    case 5:
-        // 経度
-        if(char_recv==','){
-            rx_sentence_counter++;
-            rx_counter=0;
-        }else{
-            // 読み捨て 
-            rx_counter++;
-        }
-        break;
-    case 6:
-        // 東経or西経
-        if(char_recv==','){
-            rx_sentence_counter++;
-            rx_counter=0;
-        }else{
-            // 読み捨て
-            rx_counter++;
-        }
-        break;
-    case 7:
-        // 地表における移動の速度
-        if(char_recv==','){
-            rx_sentence_counter++;
-            rx_counter=0;
-        }else{
-            // 読み捨て
-            rx_counter++;
-        }
-        break;
-    case 8:
-        // 地表における移動の真方位
-        if(char_recv==','){
-            rx_sentence_counter++;
-            rx_counter=0;
-        }else{
-            // 読み捨て
-            rx_counter++;
-        }
-        break;
-    case 9:
-        // 時刻取得
-        if(char_recv==','){
-            rx_sentence_counter++;
-            rx_counter=0;
-
-            if((gps_valid=='A') && (flg_time_update==true)){
-                hour = (gps_time[0]-48)*10+(gps_time[1]-48);
-                min = (gps_time[2]-48)*10+(gps_time[3]-48);
-                sec = (gps_time[4]-48)*10+(gps_time[5]-48);
-
-                // JSTへの補正
-                if(hour>14){
-                    hour = hour + 9 -24;
-                }else{
-                    hour = hour + 9;
-                }                        
-                
-                datetime_t t = {
-                    .year = 2000+(gps_date[4]-48)*10+(gps_date[5]-48),
-                    .month = (gps_date[2]-48)*10+(gps_date[3]-48),
-                    .day = (gps_date[0]-48)*10+(gps_date[1]-48),
-                    .dotw = 1,
-                    .hour = hour,
-                    .min = min,
-                    .sec = sec
-                };
-
-                // RTCをリセットしておく
-                reset_block(RESETS_RESET_RTC_BITS);
-                unreset_block_wait(RESETS_RESET_RTC_BITS);
-                rtc_init();
-
-                rtc_set_datetime(&t);
-
-                flg_time_update=false;
-            }
-
-            
-        }else{
-            gps_date[rx_counter]=char_recv;
-            rx_counter++;
-        }
-        break;
-    default:
-        rx_sentence_counter=0;
-        rx_counter=0;
-    }
 }
 
 //----------------------------------
