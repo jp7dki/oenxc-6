@@ -25,6 +25,7 @@ typedef enum{
 //---- Nixie Tube Dynamic-Drive Config parameters ----------
 typedef struct
 {
+    uint8_t cursor;
     datetime_t time;
     uint16_t switch_counter;
     bool flg_time_update;
@@ -37,6 +38,9 @@ typedef struct
     uint8_t next_num[6];
     uint8_t disp_change[6];
     uint8_t brightness_auto;
+    uint8_t auto_onoff;
+    datetime_t auto_off_time;
+    datetime_t auto_on_time;
 
     SwitchMode switch_mode;
 
@@ -69,8 +73,11 @@ struct nixietube
     // startup animation
     void (*startup_animation)(NixieConfig *conf);
 
-    // off_animation
+    // off/on_animation
     void (*dispoff_animation)(NixieConfig *conf);
+    void (*dispon_animation)(NixieConfig *conf);
+
+    void (*auto_onofftime_add)(NixieConfig *conf, datetime_t *time);
 };
 
 //---- constructor -------------

@@ -52,20 +52,18 @@ uint8_t count;
 bool flg_time_correct=false;
 bool flg_pps_received=false;
 
+bool flg_on = true;
+
 uint16_t pps_led_counter=0;
 uint16_t blink_counter[6] = {0,0,0,0,0,0};
 uint8_t cursor;
 uint8_t setting_num=1;
 // setting parameters
-uint8_t param_auto_onoff = 0;
 uint8_t param_off_time_hour = 7;       // default off time = 22:00
 uint8_t param_off_time_min = 16;
 uint8_t param_on_time_hour = 6;         // defualt on time = 6:00
 uint8_t param_on_time_min = 0;
 uint16_t fluctuation_level=0;
-
-bool flg_off = true;
-bool flg_on = true;
 
 // task list of delay execution.
 typedef void (*func_ptr)(void);
@@ -126,16 +124,14 @@ static void timer_alarm0_irq(void) {
 
 
     // 毎分0秒に消灯・点灯の確認をする
-    if((time.sec==0) && (param_auto_onoff==1)){
-        if((time.hour==param_off_time_hour) && (time.min==param_off_time_min)){
+    if((time.sec==0) && (nixie_conf.auto_onoff==1)){
+        if((time.hour==nixie_conf.auto_off_time.hour) && (time.min==nixie_conf.auto_off_time.min)){
             // 自動消灯
-            flg_off = true;
             operation_mode = onoff_animation;
         }
 
-        if((time.hour==param_on_time_hour) && (time.min==param_on_time_min)){
+        if((time.hour==nixie_conf.auto_on_time.hour) && (time.min==nixie_conf.auto_on_time.min)){
             // 自動点灯
-            flg_on = true;
             operation_mode = onoff_animation;
         }
     }
@@ -285,7 +281,6 @@ int main(){
     uint16_t i,j;
     uint16_t count_sw;
     datetime_t time;
-    uint64_t target;
 
     // task initialization
     for(i=0;i<NUM_TASK;i++){
@@ -305,19 +300,6 @@ int main(){
     gps = new_Gps(gps_conf);
     gps.init(&gps_conf, on_uart_rx, gpio_callback);
 
-    // Timer Settings
-    hw_set_bits(&timer_hw->inte, 1u<<0);        // Alarm0
-    irq_set_exclusive_handler(TIMER_IRQ_0, timer_alarm0_irq);
-    irq_set_enabled(TIMER_IRQ_0, true);
-    target = timer_hw->timerawl + 1000000; // interval 1s
-    timer_hw->alarm[0] = (uint32_t)target;
-
-    hw_set_bits(&timer_hw->inte, 1u<<1);        // Alarm1
-    irq_set_exclusive_handler(TIMER_IRQ_1, timer_alerm1_irq);
-    irq_set_enabled(TIMER_IRQ_1, true);
-    target = timer_hw->timerawl + 10000;   // interval 10ms
-    timer_hw->alarm[1] = (uint32_t)target;
-
     count = 0;
 
     // Core1 Task 
@@ -333,15 +315,17 @@ int main(){
 
     while (1) {
         if(operation_mode==onoff_animation){
-            if(flg_off){
+            if(flg_on){
                 // off_animation
                 nixie_tube.dispoff_animation(&nixie_conf);
-                flg_off = false;
+                flg_on = false;
+            }else{
+                // on_animation
+                nixie_tube.dispon_animation(&nixie_conf);
+                flg_on = true;
             }
 
-            if(flg_on){
-
-            }
+            operation_mode = clock_display;
         }
 
         //---- SWA -----------------------
@@ -362,6 +346,8 @@ int main(){
 //-------------------------------------------------
 void hardware_init(void)
 {   
+    uint64_t target;
+    
     gpio_init(DBG_TX_PIN);
     gpio_init(DBG_RX_PIN);
     gpio_set_dir(DBG_TX_PIN, GPIO_OUT);
@@ -392,6 +378,19 @@ void hardware_init(void)
     uart_set_format(UART_DEBUG, DATA_BITS, STOP_BITS, PARITY);
     uart_set_fifo_enabled(UART_DEBUG, false);
     uart_set_irq_enables(UART_DEBUG, false, false);
+
+    // Timer Settings
+    hw_set_bits(&timer_hw->inte, 1u<<0);        // Alarm0
+    irq_set_exclusive_handler(TIMER_IRQ_0, timer_alarm0_irq);
+    irq_set_enabled(TIMER_IRQ_0, true);
+    target = timer_hw->timerawl + 1000000; // interval 1s
+    timer_hw->alarm[0] = (uint32_t)target;
+
+    hw_set_bits(&timer_hw->inte, 1u<<1);        // Alarm1
+    irq_set_exclusive_handler(TIMER_IRQ_1, timer_alerm1_irq);
+    irq_set_enabled(TIMER_IRQ_1, true);
+    target = timer_hw->timerawl + 10000;   // interval 10ms
+    timer_hw->alarm[1] = (uint32_t)target;
 
     //---- RTC ------------------
     datetime_t t = {
@@ -472,6 +471,16 @@ void swa_short_push(void)
 
             break;
         case settings:
+            switch(setting_num){
+                case 5:
+                case 6:
+                    nixie_conf.cursor++;
+                    if(nixie_conf.cursor>3){
+                        nixie_conf.cursor=0;
+                    }
+                    break;
+
+            }
 
             break;
     }
@@ -510,15 +519,19 @@ void swb_short_push(void)
             break;
         case 4:
             // Auto on/off setting
-
+            if(nixie_conf.auto_onoff==0){
+                nixie_conf.auto_onoff=1;
+            }else{
+                nixie_conf.auto_onoff=0;
+            }
             break;
         case 5:
             // Auto on time
-
+            nixie_tube.auto_onofftime_add(&nixie_conf, &nixie_conf.auto_on_time);
             break;
         case 6:
             // Auto off time
-
+            nixie_tube.auto_onofftime_add(&nixie_conf, &nixie_conf.auto_off_time);
             break;
         case 7:
             // Jetlag setting 
@@ -554,6 +567,7 @@ void swc_short_push(void)
 
             break;
         case settings:
+            nixie_conf.cursor=0;
             setting_num++;
             if(setting_num > SETTING_MAX_NUM){
                 setting_num = 1;

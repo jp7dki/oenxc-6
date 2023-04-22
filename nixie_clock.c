@@ -204,6 +204,11 @@ static void nixie_init(NixieConfig *conf)
     conf->switch_counter=0;
     conf->flg_time_update=false;
     conf->flg_change=false;
+    conf->auto_onoff=1;
+    conf->auto_off_time.hour = 22;
+    conf->auto_off_time.min = 0;
+    conf->auto_on_time.hour = 6;
+    conf->auto_on_time.min = 0;
 }
 
 // brightness_inc: nixie-tube brightness increment
@@ -350,12 +355,27 @@ static void nixie_dynamic_setting_task(NixieConfig *conf, uint8_t setting_num)
             conf->num[0] = conf->brightness_auto;           
             break;
         case 4:
-            // auto-on time setting
-
+            // auto-on/off setting            
+            conf->num[3] = 10;   // 消灯
+            conf->num[2] = 10;   // 消灯
+            conf->num[1] = 10;   // 消灯
+            conf->num[0] = conf->auto_onoff;
             break;
         case 5:
+            // auto-on time setting
+            conf->num[3] = conf->auto_on_time.hour/10;
+            conf->num[2] = conf->auto_on_time.hour%10;
+            conf->num[1] = conf->auto_on_time.min/10; 
+            conf->num[0] = conf->auto_on_time.min%10;
+            conf->num[conf->cursor] = conf->num[conf->cursor] + 0x10;
+            break;
+        case 6:
             // auto-off time setting
-
+            conf->num[3] = conf->auto_off_time.hour/10;
+            conf->num[2] = conf->auto_off_time.hour%10;
+            conf->num[1] = conf->auto_off_time.min/10; 
+            conf->num[0] = conf->auto_off_time.min%10;
+            conf->num[conf->cursor] = conf->num[conf->cursor] + 0x10;
             break;
         default:
             conf->num[3] = 10;   // 消灯
@@ -604,6 +624,83 @@ static void nixie_dispoff_animation(NixieConfig *conf)
     }    
 }
 
+static void nixie_dispon_animation(NixieConfig *conf)
+{
+    datetime_t t;
+
+    rtc_get_datetime(&t);
+
+    for(uint16_t j=0;j<(6*40+100);j++){
+        for(uint16_t i=0;i<6;i++){
+            if(j<(i*20)){
+                conf->num[i] = 10;
+            }else if(j<((i*40)+100)){
+                conf->num[i] = (uint8_t)(rand()%10)+0x30;
+            }else{
+                switch(i){
+                    case 0:
+                        conf->num[0] = t.sec%10;
+                        break;
+                    case 1:
+                        conf->num[1] = t.sec/10;
+                        break;
+                    case 2:
+                        conf->num[2] = t.min%10;
+                        break;
+                    case 3:
+                        conf->num[3] = t.min/10;
+                        break;
+                    case 4:
+                        conf->num[4] = t.hour%10;
+                        break;
+                    case 5:
+                        conf->num[5] = t.hour/10;
+                        break; 
+                }
+            }
+        }
+        sleep_ms(5);
+    }    
+}
+
+//---- nixie_auto_ontime_add : auto-on time add sequence ---------------------
+static void nixie_auto_onofftime_add(NixieConfig *conf, datetime_t *time)
+{
+    switch(conf->cursor){
+        case 0:
+            if(time->min%10==9){
+                time->min -= 9;
+            }else{
+                time->min++;
+            }
+            break;
+        case 1:
+            if(time->min/10==5){
+                time->min = time->min%10;
+            }else{
+                time->min += 10;
+            }
+            break;
+        case 2:
+            if(time->hour%10 == 9){
+                time->hour -= 9;
+            }else if(time->hour == 23){
+                time->hour = 20;
+            }else{
+                time->hour++;
+            }
+            break;
+        case 3:
+            if(time->hour > 13){
+                time->hour = time->hour%10;
+            }else{
+                time->hour += 10;
+            }
+            break;
+    }
+}
+
+
 // constractor
 NixieTube new_NixieTube(NixieConfig Config)
 {
@@ -620,6 +717,8 @@ NixieTube new_NixieTube(NixieConfig Config)
         .clock_tick = nixie_clock_tick,
         .switch_update = nixie_switch_update,
         .startup_animation = nixie_startup_animation,
-        .dispoff_animation = nixie_dispoff_animation
+        .dispoff_animation = nixie_dispoff_animation,
+        .dispon_animation = nixie_dispon_animation,
+        .auto_onofftime_add = nixie_auto_onofftime_add,
     });
 }
