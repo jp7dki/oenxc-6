@@ -8,10 +8,10 @@ set(CMAKE_CXX_STANDARD 17)
 pico_sdk_init()
 
 add_executable(nixiev_firmware
-    main.cpp
-    nixie_clock.cpp
-    nixie_clock.hpp
-    nixie_clock_define.hpp
+    main.c
+    nixie_clock.c
+    nixie_clock.h
+    nixie_clock_define.h
 )
 
 pico_enable_stdio_usb(nixiev_firmware 1)

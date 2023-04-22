@@ -42,6 +42,4 @@
 #define UART_DEBUG uart0
 #define UART_GPS uart1
 
-const uint8_t version[6] = {0,0,0,1+0x10,0,0};
-
 #endif
