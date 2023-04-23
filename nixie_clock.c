@@ -209,6 +209,9 @@ static void nixie_init(NixieConfig *conf)
     conf->auto_off_time.min = 0;
     conf->auto_on_time.hour = 6;
     conf->auto_on_time.min = 0;
+    conf->time_difference.hour = 9;
+    conf->time_difference.min = 0;
+    conf->gps_correction = 1;
 }
 
 // brightness_inc: nixie-tube brightness increment
@@ -376,6 +379,21 @@ static void nixie_dynamic_setting_task(NixieConfig *conf, uint8_t setting_num)
             conf->num[1] = conf->auto_off_time.min/10; 
             conf->num[0] = conf->auto_off_time.min%10;
             conf->num[conf->cursor] = conf->num[conf->cursor] + 0x10;
+            break;
+        case 7:
+            // time_difference setting
+            conf->num[3] = conf->time_difference.hour/10;
+            conf->num[2] = conf->time_difference.hour%10;
+            conf->num[1] = conf->time_difference.min/10; 
+            conf->num[0] = conf->time_difference.min%10;
+            conf->num[conf->cursor] = conf->num[conf->cursor] + 0x10;
+            break;
+        case 8:
+            // GPS time correction on/off       
+            conf->num[3] = 10;   // 消灯
+            conf->num[2] = 10;   // 消灯
+            conf->num[1] = 10;   // 消灯
+            conf->num[0] = conf->gps_correction;
             break;
         default:
             conf->num[3] = 10;   // 消灯
@@ -664,7 +682,7 @@ static void nixie_dispon_animation(NixieConfig *conf)
 }
 
 //---- nixie_auto_ontime_add : auto-on time add sequence ---------------------
-static void nixie_auto_onofftime_add(NixieConfig *conf, datetime_t *time)
+static void nixie_time_add(NixieConfig *conf, datetime_t *time)
 {
     switch(conf->cursor){
         case 0:
@@ -700,6 +718,40 @@ static void nixie_auto_onofftime_add(NixieConfig *conf, datetime_t *time)
     }
 }
 
+//---- get_time_diffrence_correction --------------------------
+datetime_t nixie_get_time_difference_correction(NixieConfig *conf, datetime_t time)
+{
+    datetime_t t = time;
+    int8_t min, hour;
+
+    min = t.min + conf->time_difference.min;
+
+    if(min > 59){
+        t.hour++;
+        min -= 60;
+    }
+
+    if(min < 0){
+        t.hour--;
+        min += 60;
+    }
+
+    hour = t.hour + conf->time_difference.hour;
+
+    if(hour > 23){
+        hour -= 24;
+    }
+
+    if(hour < 0){
+        hour += 24;
+    }
+
+    t.hour = hour;
+    t.min = min;
+
+    return t;
+}
+
 
 // constractor
 NixieTube new_NixieTube(NixieConfig Config)
@@ -719,6 +771,7 @@ NixieTube new_NixieTube(NixieConfig Config)
         .startup_animation = nixie_startup_animation,
         .dispoff_animation = nixie_dispoff_animation,
         .dispon_animation = nixie_dispon_animation,
-        .auto_onofftime_add = nixie_auto_onofftime_add,
+        .time_add = nixie_time_add,
+        .get_time_difference_correction = nixie_get_time_difference_correction
     });
 }

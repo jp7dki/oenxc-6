@@ -80,7 +80,9 @@ enum OperationMode{
     time_adjust,
     random_disp,
     demo,
-    onoff_animation
+    off_animation,
+    on_animation,
+    poweroff
 } operation_mode;
 
 NixieTube nixie_tube;
@@ -122,21 +124,22 @@ static void timer_alarm0_irq(void) {
     uint64_t target = timer_hw->timerawl + 999999; // interval 1s
     timer_hw->alarm[0] = (uint32_t)target;
 
+    rtc_get_datetime(&time);
+    time = nixie_tube.get_time_difference_correction(&nixie_conf, time);
 
     // 毎分0秒に消灯・点灯の確認をする
     if((time.sec==0) && (nixie_conf.auto_onoff==1)){
         if((time.hour==nixie_conf.auto_off_time.hour) && (time.min==nixie_conf.auto_off_time.min)){
             // 自動消灯
-            operation_mode = onoff_animation;
+            operation_mode = off_animation;
         }
 
         if((time.hour==nixie_conf.auto_on_time.hour) && (time.min==nixie_conf.auto_on_time.min)){
             // 自動点灯
-            operation_mode = onoff_animation;
+            operation_mode = on_animation;
         }
     }
 
-    rtc_get_datetime(&time);
     // 毎時0分0秒に時刻合わせを行う
     if((time.sec==0) && (time.min==0)){
         flg_time_correct = false;
@@ -182,6 +185,7 @@ static void timer_alerm1_irq(void) {
     }
 
     rtc_get_datetime(&time);
+    time = nixie_tube.get_time_difference_correction(&nixie_conf, time);
     nixie_tube.switch_update(&nixie_conf, time);
 
     // Nixie-Tube brightness(anode current) update
@@ -202,7 +206,8 @@ void core1_entry(){
 
             // Power up animation
             case power_up_animation:
-            case onoff_animation:
+            case on_animation:
+            case off_animation:
 
                 nixie_tube.dynamic_display_task(&nixie_conf);
                 break;
@@ -257,11 +262,13 @@ static irq_handler_t gpio_callback(uint gpio, uint32_t event){
     datetime_t time;
     uint8_t i;
 
-    if(flg_time_correct==false){
-        uint64_t target = timer_hw->timerawl + 999999; // interval 1s
-        timer_hw->alarm[0] = (uint32_t)target;
-        flg_time_correct=true;
-        flg_pps_received=true;
+    if(nixie_conf.gps_correction==1){
+        if(flg_time_correct==false){
+            uint64_t target = timer_hw->timerawl + 999999; // interval 1s
+            timer_hw->alarm[0] = (uint32_t)target;
+            flg_time_correct=true;
+            flg_pps_received=true;
+        }
     }
 
     if(operation_mode==clock_display){
@@ -314,17 +321,15 @@ int main(){
     operation_mode = clock_display;
 
     while (1) {
-        if(operation_mode==onoff_animation){
-            if(flg_on){
-                // off_animation
-                nixie_tube.dispoff_animation(&nixie_conf);
-                flg_on = false;
-            }else{
-                // on_animation
-                nixie_tube.dispon_animation(&nixie_conf);
-                flg_on = true;
-            }
+        if(operation_mode==off_animation){
+            // off_animation
+            nixie_tube.dispoff_animation(&nixie_conf);
+            operation_mode = poweroff;
+        }
 
+        if(operation_mode==on_animation){
+            // on_animation
+            nixie_tube.dispon_animation(&nixie_conf);
             operation_mode = clock_display;
         }
 
@@ -474,6 +479,7 @@ void swa_short_push(void)
             switch(setting_num){
                 case 5:
                 case 6:
+                case 7:
                     nixie_conf.cursor++;
                     if(nixie_conf.cursor>3){
                         nixie_conf.cursor=0;
@@ -527,19 +533,23 @@ void swb_short_push(void)
             break;
         case 5:
             // Auto on time
-            nixie_tube.auto_onofftime_add(&nixie_conf, &nixie_conf.auto_on_time);
+            nixie_tube.time_add(&nixie_conf, &nixie_conf.auto_on_time);
             break;
         case 6:
             // Auto off time
-            nixie_tube.auto_onofftime_add(&nixie_conf, &nixie_conf.auto_off_time);
+            nixie_tube.time_add(&nixie_conf, &nixie_conf.auto_off_time);
             break;
         case 7:
-            // Jetlag setting 
-
+            // Time difference setting
+            nixie_tube.time_add(&nixie_conf, &nixie_conf.time_difference);
             break;
         case 8:
             // GPS time correction on/off
-
+            if(nixie_conf.gps_correction==0){
+                nixie_conf.gps_correction=1;
+            }else{
+                nixie_conf.gps_correction=0;
+            }
             break;
         case 9:
             // LED setting

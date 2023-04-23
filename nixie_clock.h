@@ -26,7 +26,6 @@ typedef enum{
 typedef struct
 {
     uint8_t cursor;
-    datetime_t time;
     uint16_t switch_counter;
     bool flg_time_update;
     bool flg_change;
@@ -41,6 +40,9 @@ typedef struct
     uint8_t auto_onoff;
     datetime_t auto_off_time;
     datetime_t auto_on_time;
+    datetime_t time_difference;
+
+    uint8_t gps_correction;
 
     SwitchMode switch_mode;
 
@@ -77,7 +79,10 @@ struct nixietube
     void (*dispoff_animation)(NixieConfig *conf);
     void (*dispon_animation)(NixieConfig *conf);
 
-    void (*auto_onofftime_add)(NixieConfig *conf, datetime_t *time);
+    void (*time_add)(NixieConfig *conf, datetime_t *time);
+
+    // time_difference correction
+    datetime_t (*get_time_difference_correction)(NixieConfig *conf, datetime_t time);
 };
 
 //---- constructor -------------

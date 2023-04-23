@@ -128,14 +128,7 @@ static bool gps_receive(GpsConfig *conf, char char_recv)
             if(conf->gps_valid=='A'){
                 hour = (conf->gps_time[0]-48)*10+(conf->gps_time[1]-48);
                 min = (conf->gps_time[2]-48)*10+(conf->gps_time[3]-48);
-                sec = (conf->gps_time[4]-48)*10+(conf->gps_time[5]-48);
-
-                // JSTへの補正
-                if(hour>14){
-                    hour = hour + 9 -24;
-                }else{
-                    hour = hour + 9;
-                }                        
+                sec = (conf->gps_time[4]-48)*10+(conf->gps_time[5]-48);                   
                 
                 conf->gps_datetime.year = 2000+(conf->gps_date[4]-48)*10+(conf->gps_date[5]-48);
                 conf->gps_datetime.month = (conf->gps_date[2]-48)*10+(conf->gps_date[3]-48);
