@@ -1,5 +1,9 @@
 #include "nixie_clock.h"
 
+
+float z[MAX_Z];
+float k[MAX_Z];
+
 //---- cathode port definition ------------
 uint8_t cathode_port[10] = {
     K0_PIN,
@@ -105,6 +109,34 @@ static uint8_t get_brightness(NixieConfig *conf)
 {
     return conf->brightness;
 }
+
+//---- pink filter -----------------------
+static void init_pink(void) {
+    extern float   z[MAX_Z];
+    extern float   k[MAX_Z];
+    int             i;
+
+    for (i = 0; i < MAX_Z; i++)
+        z[i] = 0;
+    k[MAX_Z - 1] = 0.5;
+    for (i = MAX_Z - 1; i > 0; i--)
+        k[i - 1] = k[i] * 0.25;
+}
+
+static float pinkfilter(float in) {
+    extern float   z[MAX_Z];
+    extern float   k[MAX_Z];
+    static float   t = 0.0;
+    float          q;
+    int             i;
+
+    q = in;
+    for (i = 0; i < MAX_Z; i++) {
+        z[i] = (q * k[i] + z[i] * (1.0 - k[i]));
+        q = (q + z[i]) * 0.5;
+    }
+    return (t = 0.75 * q + 0.25 * t); 
+} 
 
 //-----------------------------------------------------------
 // Public method
@@ -212,6 +244,11 @@ static void nixie_init(NixieConfig *conf)
     conf->time_difference.hour = 9;
     conf->time_difference.min = 0;
     conf->gps_correction = 1;
+    conf->led_setting = 1;
+    conf->fluctuation_level = 0;
+
+    // pink-filter initialization
+    init_pink();
 }
 
 // brightness_inc: nixie-tube brightness increment
@@ -225,17 +262,34 @@ static void nixie_brightness_inc(NixieConfig *conf)
 static void nixie_brightness_update(NixieConfig *conf)
 {
     // light sensor read
-    uint8_t brightness_level;
+    uint16_t brightness_level;
     if(conf->brightness_auto==1){
         uint32_t result = adc_read();
         brightness_level = result*100/3000;
+
         if(brightness_level > 100) brightness_level=100;
         if(brightness_level <20) brightness_level=20;
     }else{
+        // light sensor don't read
         brightness_level = 100;
     }
 
-    pwm_set_chan_level(conf->slice_num0, PWM_CHAN_A, ((1000+160*conf->brightness)*brightness_level/100));
+    // 1/fゆらぎ処理
+    int rd=random()/(RAND_MAX/10000)-5000;      // 乱数生成
+    float pr = pinkfilter(rd); 
+    brightness_level += pr*conf->fluctuation_level;
+
+    uint16_t current_setting = 500+300*(conf->brightness+1)*brightness_level/100;
+
+    // limitter
+    if(current_setting > 2800){
+        current_setting = 2800;
+    }else if(current_setting < 100){
+        current_setting = 100;
+    }
+
+    pwm_set_chan_level(conf->slice_num0, PWM_CHAN_A, current_setting);
+    //pwm_set_chan_level(conf->slice_num0, PWM_CHAN_A, ((1000+160*conf->brightness)*brightness_level/100));
 }
 
 // switch_mode_inc: nixie-tube mode increment
@@ -395,11 +449,24 @@ static void nixie_dynamic_setting_task(NixieConfig *conf, uint8_t setting_num)
             conf->num[1] = 10;   // 消灯
             conf->num[0] = conf->gps_correction;
             break;
-        default:
+        case 9:
+            // LED setting    
             conf->num[3] = 10;   // 消灯
             conf->num[2] = 10;   // 消灯
             conf->num[1] = 10;   // 消灯
-            conf->num[0] = 0;
+            conf->num[0] = conf->led_setting;            
+            break;
+        case 10:
+            // fluctuation level
+            conf->num[3] = 10;   // 消灯
+            conf->num[2] = conf->fluctuation_level/100;
+            conf->num[1] = (conf->fluctuation_level/10)%10;
+            conf->num[0] = conf->fluctuation_level%10;
+            conf->num[conf->cursor] = conf->num[conf->cursor] + 0x10;
+            break;
+        
+        default:
+            break;
     }
     
     for(uint8_t i=0;i<6;i++){
@@ -752,6 +819,32 @@ datetime_t nixie_get_time_difference_correction(NixieConfig *conf, datetime_t ti
     return t;
 }
 
+static void nixie_fluctuation_level_add(NixieConfig *conf)
+{
+    switch(conf->cursor){
+        case 0:
+            if(conf->fluctuation_level%10==9){
+                conf->fluctuation_level -= 9;
+            }else{
+                conf->fluctuation_level++;
+            }
+            break;
+        case 1:
+            if((conf->fluctuation_level/10)%10==9){
+                conf->fluctuation_level -= 90;
+            }else{
+                conf->fluctuation_level += 10;
+            }
+            break;
+        case 2:
+            if(conf->fluctuation_level/100 == 9){
+                conf->fluctuation_level -= 900;
+            }else{
+                conf->fluctuation_level += 100;
+            }
+            break;
+    }
+}
 
 // constractor
 NixieTube new_NixieTube(NixieConfig Config)
@@ -772,6 +865,7 @@ NixieTube new_NixieTube(NixieConfig Config)
         .dispoff_animation = nixie_dispoff_animation,
         .dispon_animation = nixie_dispon_animation,
         .time_add = nixie_time_add,
-        .get_time_difference_correction = nixie_get_time_difference_correction
+        .get_time_difference_correction = nixie_get_time_difference_correction,
+        .fluctuation_level_add = nixie_fluctuation_level_add
     });
 }

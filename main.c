@@ -41,9 +41,6 @@
 #define NUM_TASK 10
 #define SETTING_MAX_NUM 10
 
-// PINK filter
-#define MAX_Z 16
-
 //-------------------------------------------------------
 //- Global Variable
 //-------------------------------------------------------
@@ -63,7 +60,6 @@ uint8_t param_off_time_hour = 7;       // default off time = 22:00
 uint8_t param_off_time_min = 16;
 uint8_t param_on_time_hour = 6;         // defualt on time = 6:00
 uint8_t param_on_time_min = 0;
-uint16_t fluctuation_level=0;
 
 // task list of delay execution.
 typedef void (*func_ptr)(void);
@@ -263,18 +259,22 @@ static irq_handler_t gpio_callback(uint gpio, uint32_t event){
     uint8_t i;
 
     if(nixie_conf.gps_correction==1){
+        // time_correction
         if(flg_time_correct==false){
             uint64_t target = timer_hw->timerawl + 999999; // interval 1s
             timer_hw->alarm[0] = (uint32_t)target;
             flg_time_correct=true;
             flg_pps_received=true;
         }
-    }
 
-    if(operation_mode==clock_display){
-        // 1PPS_LED ON (200ms)
-        gps.pps_led_on();
-        task_add(gps.pps_led_off, 20);
+        // PPS LED
+        if(operation_mode==clock_display){
+            if(nixie_conf.led_setting==1){
+                // 1PPS_LED ON (200ms)
+                gps.pps_led_on();
+                task_add(gps.pps_led_off, 20);
+            }
+        }
     }
 
 }
@@ -485,6 +485,12 @@ void swa_short_push(void)
                         nixie_conf.cursor=0;
                     }
                     break;
+                case 10:
+                    nixie_conf.cursor++;
+                    if(nixie_conf.cursor>2){
+                        nixie_conf.cursor=0;
+                    }
+                    break;
 
             }
 
@@ -553,11 +559,15 @@ void swb_short_push(void)
             break;
         case 9:
             // LED setting
-            
+            if(nixie_conf.led_setting==0){
+                nixie_conf.led_setting=1;
+            }else{
+                nixie_conf.led_setting=0;
+            }         
             break;
         case 10:
-            // 1/f fraction setting
-
+            // 1/f fluctuation level setting
+            nixie_tube.fluctuation_level_add(&nixie_conf);
             break;
         default:
             break;
@@ -590,32 +600,3 @@ void swc_long_push(void)
 {
     gpio_put(DBGLED_PIN,1);    
 }
-
-/*
-//---- pink filter -----------------------
-void init_pink(void) {
-    extern float   z[MAX_Z];
-    extern float   k[MAX_Z];
-    int             i;
-
-    for (i = 0; i < MAX_Z; i++)
-        z[i] = 0;
-    k[MAX_Z - 1] = 0.5;
-    for (i = MAX_Z - 1; i > 0; i--)
-        k[i - 1] = k[i] * 0.25;
-}
-
-float pinkfilter(float in) {
-    extern float   z[MAX_Z];
-    extern float   k[MAX_Z];
-    static float   t = 0.0;
-    float          q;
-    int             i;
-
-    q = in;
-    for (i = 0; i < MAX_Z; i++) {
-        z[i] = (q * k[i] + z[i] * (1.0 - k[i]));
-        q = (q + z[i]) * 0.5;
-    }
-    return (t = 0.75 * q + 0.25 * t); 
-} */

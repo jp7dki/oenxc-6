@@ -13,6 +13,9 @@
 #include "hardware/pwm.h"
 #include "hardware/adc.h"
 
+// PINK filter
+#define MAX_Z 16
+
 //---- Switch mode definition ------------
 typedef enum{
     normal,
@@ -43,6 +46,10 @@ typedef struct
     datetime_t time_difference;
 
     uint8_t gps_correction;
+
+    uint8_t led_setting;
+
+    uint16_t fluctuation_level;
 
     SwitchMode switch_mode;
 
@@ -83,6 +90,9 @@ struct nixietube
 
     // time_difference correction
     datetime_t (*get_time_difference_correction)(NixieConfig *conf, datetime_t time);
+
+    // fluctuation level add
+    void (*fluctuation_level_add)(NixieConfig *conf);
 };
 
 //---- constructor -------------
