@@ -279,7 +279,7 @@ static void nixie_brightness_update(NixieConfig *conf)
     float pr = pinkfilter(rd); 
     brightness_level += pr*conf->fluctuation_level;
 
-    uint16_t current_setting = 500+300*(conf->brightness+1)*brightness_level/100;
+    uint16_t current_setting = 500+300*(conf->brightness+1)*brightness_level/200;
 
     // limitter
     if(current_setting > 2800){
@@ -468,6 +468,78 @@ static void nixie_dynamic_setting_task(NixieConfig *conf, uint8_t setting_num)
         default:
             break;
     }
+    
+    for(uint8_t i=0;i<6;i++){
+        // 通常の切り替え
+        disp(conf, i);
+        sleep_us(20*conf->disp_duty[i]);
+
+        disp_blank();
+        sleep_us(20*(100-conf->disp_duty[i]));
+
+        sleep_us(150);
+    }    
+}
+
+// random display task
+static void nixie_dynamic_random_task(NixieConfig *conf)
+{
+    // if don't start, display all zero
+    if(conf->random_start == false){
+        for(uint8_t i=0;i<6;i++){
+            conf->num[i] = 0;
+        }
+    }else{
+
+            // random number
+            if(conf->random_count < (6*80+200)){
+
+                for(uint8_t i=0;i<6;i++){
+                    if(conf->random_count < ((i*80)+200)){
+                        conf->num[i] = (uint8_t)(rand()%10);
+                    }else{
+                        conf->num[i] = conf->num[i];
+                    }
+                }
+
+                conf->random_count++;
+            }else{
+                
+            }
+
+    }
+    
+    for(uint8_t i=0;i<6;i++){
+        // 通常の切り替え
+        disp(conf, i);
+        sleep_us(20*conf->disp_duty[i]);
+
+        disp_blank();
+        sleep_us(20*(100-conf->disp_duty[i]));
+
+        sleep_us(150);
+    }    
+}
+
+// random display task
+static void nixie_dynamic_demo_task(NixieConfig *conf)
+{
+    // random number
+    if(conf->random_count < (6*80+250)){
+
+        for(uint8_t i=0;i<6;i++){
+            if(conf->random_count < ((i*80)+200)){
+                conf->num[i] = (uint8_t)(rand()%10);
+            }else{
+                conf->num[i] = conf->num[i];
+            }
+        }
+
+        conf->random_count++;
+    }else{
+        conf->random_count = 0;
+    }
+
     
     for(uint8_t i=0;i<6;i++){
         // 通常の切り替え
@@ -859,6 +931,8 @@ NixieTube new_NixieTube(NixieConfig Config)
         .dynamic_display_task = nixie_dynamic_display_task,
         .dynamic_clock_task = nixie_dynamic_clock_task,
         .dynamic_setting_task = nixie_dynamic_setting_task,
+        .dynamic_random_task = nixie_dynamic_random_task,
+        .dynamic_demo_task = nixie_dynamic_demo_task,
         .clock_tick = nixie_clock_tick,
         .switch_update = nixie_switch_update,
         .startup_animation = nixie_startup_animation,

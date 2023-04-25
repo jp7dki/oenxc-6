@@ -221,6 +221,18 @@ void core1_entry(){
                 nixie_tube.dynamic_setting_task(&nixie_conf, setting_num);
                 break;
 
+            // Random display
+            case random_disp:
+
+                nixie_tube.dynamic_random_task(&nixie_conf);
+                break;
+
+            // Demo display
+            case demo:
+
+                nixie_tube.dynamic_demo_task(&nixie_conf);
+                break;
+
             defalut:
                 break;    
         }
@@ -495,6 +507,11 @@ void swa_short_push(void)
             }
 
             break;
+        case random_disp:
+            nixie_conf.random_count = 0;
+            nixie_conf.random_start = true;
+            break;
+
     }
 }
 
@@ -507,77 +524,98 @@ void swa_long_push(void)
         case settings:
             operation_mode = clock_display;
             break;
+        default:
+            operation_mode = clock_display;
+            break;
     }
 }
 
 void swb_short_push(void)
 {
-    switch(setting_num){
-        case 1:
-            // Switching mode 
-            nixie_tube.switch_mode_inc(&nixie_conf);
-            break;
-        case 2:
-            // Brightness setting
-            nixie_tube.brightness_inc(&nixie_conf);
-            break;
-        case 3:
-            // Brightness auto setting
-            if(nixie_tube.conf.brightness_auto==0){
-                nixie_tube.conf.brightness_auto=1;
-            }else{
-                nixie_tube.conf.brightness_auto=0;
-            }
-            break;
-        case 4:
-            // Auto on/off setting
-            if(nixie_conf.auto_onoff==0){
-                nixie_conf.auto_onoff=1;
-            }else{
-                nixie_conf.auto_onoff=0;
-            }
-            break;
-        case 5:
-            // Auto on time
-            nixie_tube.time_add(&nixie_conf, &nixie_conf.auto_on_time);
-            break;
-        case 6:
-            // Auto off time
-            nixie_tube.time_add(&nixie_conf, &nixie_conf.auto_off_time);
-            break;
-        case 7:
-            // Time difference setting
-            nixie_tube.time_add(&nixie_conf, &nixie_conf.time_difference);
-            break;
-        case 8:
-            // GPS time correction on/off
-            if(nixie_conf.gps_correction==0){
-                nixie_conf.gps_correction=1;
-            }else{
-                nixie_conf.gps_correction=0;
-            }
-            break;
-        case 9:
-            // LED setting
-            if(nixie_conf.led_setting==0){
-                nixie_conf.led_setting=1;
-            }else{
-                nixie_conf.led_setting=0;
-            }         
-            break;
-        case 10:
-            // 1/f fluctuation level setting
-            nixie_tube.fluctuation_level_add(&nixie_conf);
-            break;
-        default:
-            break;
+    switch(operation_mode){
+        case settings:
+            switch(setting_num){
+                case 1:
+                    // Switching mode 
+                    nixie_tube.switch_mode_inc(&nixie_conf);
+                    break;
+                case 2:
+                    // Brightness setting
+                    nixie_tube.brightness_inc(&nixie_conf);
+                    break;
+                case 3:
+                    // Brightness auto setting
+                    if(nixie_tube.conf.brightness_auto==0){
+                        nixie_tube.conf.brightness_auto=1;
+                    }else{
+                        nixie_tube.conf.brightness_auto=0;
+                    }
+                    break;
+                case 4:
+                    // Auto on/off setting
+                    if(nixie_conf.auto_onoff==0){
+                        nixie_conf.auto_onoff=1;
+                    }else{
+                        nixie_conf.auto_onoff=0;
+                    }
+                    break;
+                case 5:
+                    // Auto on time
+                    nixie_tube.time_add(&nixie_conf, &nixie_conf.auto_on_time);
+                    break;
+                case 6:
+                    // Auto off time
+                    nixie_tube.time_add(&nixie_conf, &nixie_conf.auto_off_time);
+                    break;
+                case 7:
+                    // Time difference setting
+                    nixie_tube.time_add(&nixie_conf, &nixie_conf.time_difference);
+                    break;
+                case 8:
+                    // GPS time correction on/off
+                    if(nixie_conf.gps_correction==0){
+                        nixie_conf.gps_correction=1;
+                    }else{
+                        nixie_conf.gps_correction=0;
+                    }
+                    break;
+                case 9:
+                    // LED setting
+                    if(nixie_conf.led_setting==0){
+                        nixie_conf.led_setting=1;
+                    }else{
+                        nixie_conf.led_setting=0;
+                    }         
+                    break;
+                case 10:
+                    // 1/f fluctuation level setting
+                    nixie_tube.fluctuation_level_add(&nixie_conf);
+                    break;
+                default:
+                    break;
 
+            }
+
+            break;
+        
+        case random_disp:
+            nixie_conf.random_count = 0;
+            nixie_conf.random_start = true;
+            operation_mode = demo;
+            break;
     }
 }
 
 void swb_long_push(void)
 {
-    gpio_put(DBGLED_PIN,1);
+    switch(operation_mode){
+        case clock_display:
+            operation_mode = random_disp;
+            nixie_conf.random_start = false;
+            break;
+        default:
+            break;
+    }
 }
 
 void swc_short_push(void)

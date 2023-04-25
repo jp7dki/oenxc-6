@@ -53,6 +53,9 @@ typedef struct
 
     SwitchMode switch_mode;
 
+    bool random_start;
+    uint16_t random_count;
+
 } NixieConfig;
 
 //---- Nixie Tube Dynamic-Drive structure -------------
@@ -73,6 +76,8 @@ struct nixietube
     void (*dynamic_display_task)(NixieConfig *conf);
     void (*dynamic_clock_task)(NixieConfig *conf);
     void (*dynamic_setting_task)(NixieConfig *conf, uint8_t setting_num);
+    void (*dynamic_random_task)(NixieConfig *conf);
+    void (*dynamic_demo_task)(NixieConfig *conf);
 
     // tick second
     void (*clock_tick)(NixieConfig *conf, datetime_t time);
