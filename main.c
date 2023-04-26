@@ -232,6 +232,12 @@ void core1_entry(){
 
                 nixie_tube.dynamic_demo_task(&nixie_conf);
                 break;
+            
+            // Time adjust
+            case time_adjust:
+
+                nixie_tube.dynamic_timeadjust_task(&nixie_conf);
+                break;
 
             defalut:
                 break;    
@@ -511,7 +517,12 @@ void swa_short_push(void)
             nixie_conf.random_count = 0;
             nixie_conf.random_start = true;
             break;
-
+        case time_adjust:
+            nixie_conf.cursor++;
+            if(nixie_conf.cursor>5){
+                nixie_conf.cursor=0;
+            }
+            break;
     }
 }
 
@@ -524,6 +535,17 @@ void swa_long_push(void)
         case settings:
             operation_mode = clock_display;
             break;
+        case time_adjust:
+                // RTCをリセットしておく
+                reset_block(RESETS_RESET_RTC_BITS);
+                unreset_block_wait(RESETS_RESET_RTC_BITS);
+                rtc_init();
+
+                datetime_t t = nixie_tube.get_adjust_time(&nixie_conf);
+
+                rtc_set_datetime(&t);
+                operation_mode = clock_display;
+
         default:
             operation_mode = clock_display;
             break;
@@ -603,6 +625,9 @@ void swb_short_push(void)
             nixie_conf.random_start = true;
             operation_mode = demo;
             break;
+        case time_adjust:
+            nixie_tube.timeadjust_inc(&nixie_conf);
+            break;
     }
 }
 
@@ -631,10 +656,23 @@ void swc_short_push(void)
                 setting_num = 1;
             }
             break;
+        case time_adjust:
+            if(nixie_conf.cursor == 0){
+                nixie_conf.cursor = 5;
+            }else{
+                nixie_conf.cursor--;
+            }
+            break;
     }
 }
 
 void swc_long_push(void)
 {
-    gpio_put(DBGLED_PIN,1);    
+    switch(operation_mode){
+        case clock_display:
+            operation_mode = time_adjust;
+            break;
+        default:
+            break;
+    }  
 }

@@ -553,6 +553,29 @@ static void nixie_dynamic_demo_task(NixieConfig *conf)
     }    
 }
 
+static void nixie_dynamic_timeadjust_task(NixieConfig *conf)
+{
+
+    for(uint8_t i=0; i<6; i++){
+        if(conf->cursor == i){
+            conf->num[i] = conf->num[i] | 0x10;    
+        }else{
+            conf->num[i] = conf->num[i] & 0x0F;
+        }
+    }
+    
+    for(uint8_t i=0;i<6;i++){
+        // 通常の切り替え
+        disp(conf, i);
+        sleep_us(20*conf->disp_duty[i]);
+
+        disp_blank();
+        sleep_us(20*(100-conf->disp_duty[i]));
+
+        sleep_us(150);
+    }    
+}
+
 // clock_tick: clock tick
 static void nixie_clock_tick(NixieConfig *conf, datetime_t time)
 {
@@ -918,6 +941,106 @@ static void nixie_fluctuation_level_add(NixieConfig *conf)
     }
 }
 
+//---- nixie_timeadjust_ainc : adjust time increment function ---------------------
+static void nixie_timeadjust_inc(NixieConfig *conf)
+{
+    switch(conf->cursor){
+        case 0:
+            if((conf->num[0]&0x0F)==9){
+                conf->num[0] = 0;
+            }else{
+                conf->num[0]++;
+            }
+            break;
+        case 1:
+            if((conf->num[1]&0x0F)==5){
+                conf->num[1] = 0;
+            }else{
+                conf->num[1]++;
+            }
+            break;
+        case 2:
+            if((conf->num[2]&0x0F)==9){
+                conf->num[2] = 0;
+            }else{
+                conf->num[2]++;
+            }
+            break;
+        case 3:
+            if((conf->num[3]&0x0F)==5){
+                conf->num[3] = 0;
+            }else{
+                conf->num[3]++;
+            }
+            break;
+        case 4:
+            if((conf->num[5]&0x0F)==2){
+                if((conf->num[4]&0x0F)==3){
+                    conf->num[4] = 0;
+                }else{
+                    conf->num[4]++;
+                }
+            }else{
+                if((conf->num[4]&0x0F)==9){
+                    conf->num[4] = 0;
+                }else{
+                    conf->num[4]++;
+                }                
+            }
+            break;
+        case 5:
+            if((conf->num[4]&0x0F) > 3){
+                if((conf->num[5]&0x0F)==1){
+                    conf->num[5] = 0;
+                }else{
+                    conf->num[5]++;
+                }
+            }else{
+                if((conf->num[5]&0x0F)==2){
+                    conf->num[5] = 0;
+                }else{
+                    conf->num[5]++;
+                }
+            }
+            break;
+    }    
+}
+
+//---- nixie_get_adjust_time : adusted time set. ----------------------------
+static datetime_t nixie_get_adjust_time(NixieConfig *conf)
+{
+    datetime_t time;
+
+    time.year = 2023;
+    time.month = 1;
+    time.day = 1;
+    time.dotw = 1;
+    time.hour = (conf->num[5] & 0x0F)*10 + (conf->num[4] & 0x0F);
+    time.min = (conf->num[3] & 0x0F)*10 + (conf->num[2] & 0x0F);
+    time.sec = (conf->num[1] & 0x0F)*10 + (conf->num[0] & 0x0F);
+
+    // 時差の逆補正をしておく
+    int8_t min, hour;
+
+    if(time.min < conf->time_difference.min){
+        time.min += 60;
+
+        if(time.hour==0){
+            time.hour=23;
+        }else{
+            time.hour--;
+        }
+    }
+    time.min -= conf->time_difference.min;
+
+    if(time.hour < conf->time_difference.hour){
+        time.hour += 24;
+    }
+    time.hour -= conf->time_difference.hour;
+
+    return time;
+}
+
 // constractor
 NixieTube new_NixieTube(NixieConfig Config)
 {
@@ -933,6 +1056,7 @@ NixieTube new_NixieTube(NixieConfig Config)
         .dynamic_setting_task = nixie_dynamic_setting_task,
         .dynamic_random_task = nixie_dynamic_random_task,
         .dynamic_demo_task = nixie_dynamic_demo_task,
+        .dynamic_timeadjust_task = nixie_dynamic_timeadjust_task,
         .clock_tick = nixie_clock_tick,
         .switch_update = nixie_switch_update,
         .startup_animation = nixie_startup_animation,
@@ -940,6 +1064,8 @@ NixieTube new_NixieTube(NixieConfig Config)
         .dispon_animation = nixie_dispon_animation,
         .time_add = nixie_time_add,
         .get_time_difference_correction = nixie_get_time_difference_correction,
-        .fluctuation_level_add = nixie_fluctuation_level_add
+        .fluctuation_level_add = nixie_fluctuation_level_add,
+        .timeadjust_inc = nixie_timeadjust_inc,
+        .get_adjust_time = nixie_get_adjust_time
     });
 }

@@ -78,6 +78,7 @@ struct nixietube
     void (*dynamic_setting_task)(NixieConfig *conf, uint8_t setting_num);
     void (*dynamic_random_task)(NixieConfig *conf);
     void (*dynamic_demo_task)(NixieConfig *conf);
+    void (*dynamic_timeadjust_task)(NixieConfig *conf);
 
     // tick second
     void (*clock_tick)(NixieConfig *conf, datetime_t time);
@@ -98,6 +99,10 @@ struct nixietube
 
     // fluctuation level add
     void (*fluctuation_level_add)(NixieConfig *conf);
+
+    // time adjust add
+    void (*timeadjust_inc)(NixieConfig *conf);
+    datetime_t (*get_adjust_time)(NixieConfig *conf);
 };
 
 //---- constructor -------------
