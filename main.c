@@ -317,10 +317,9 @@ int main(){
 
     bi_decl(bi_program_description("This is a test program for nixie6."));
 
-    hardware_init();
-
     nixie_tube = new_NixieTube(nixie_conf);
     nixie_tube.init(&nixie_conf);
+    hardware_init();
 
     gps = new_Gps(gps_conf);
     gps.init(&gps_conf, on_uart_rx, gpio_callback);
@@ -533,6 +532,7 @@ void swa_long_push(void)
             operation_mode = settings;
             break;
         case settings:
+            nixie_tube.parameter_backup(&nixie_conf);
             operation_mode = clock_display;
             break;
         case time_adjust:

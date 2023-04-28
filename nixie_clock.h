@@ -7,14 +7,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "nixie_clock_define.h"
+#include "pico/util/datetime.h"
+#include "pico/binary_info.h"
 #include "pico/stdlib.h"
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "hardware/pwm.h"
 #include "hardware/adc.h"
+#include "hardware/flash.h"
 
-// PINK filter
+// PINK filter constant definition
 #define MAX_Z 16
+
+// FLASH
+#define FLASH_TARGET_OFFSET (512 * 1024)
 
 //---- Switch mode definition ------------
 typedef enum{
@@ -28,6 +34,7 @@ typedef enum{
 //---- Nixie Tube Dynamic-Drive Config parameters ----------
 typedef struct
 {
+    uint8_t writed;
     uint8_t cursor;
     uint16_t switch_counter;
     bool flg_time_update;
@@ -57,6 +64,13 @@ typedef struct
     uint16_t random_count;
 
 } NixieConfig;
+
+typedef union Nvol_data{
+    uint8_t flash_byte[FLASH_PAGE_SIZE];
+    NixieConfig nixie_config;
+}NvolData;
+
+static NvolData flash_data;
 
 //---- Nixie Tube Dynamic-Drive structure -------------
 typedef struct nixietube NixieTube;
@@ -103,6 +117,9 @@ struct nixietube
     // time adjust add
     void (*timeadjust_inc)(NixieConfig *conf);
     datetime_t (*get_adjust_time)(NixieConfig *conf);
+
+    // parameter backup
+    void (*parameter_backup)(NixieConfig *conf);
 };
 
 //---- constructor -------------

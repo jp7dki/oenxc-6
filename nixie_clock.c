@@ -51,7 +51,9 @@ static void disp_num(uint8_t num, uint8_t digit){
 
     // Selected Anode and Cathode ON
     gpio_put(anode_port[digit],1);
-    gpio_put(cathode_port[num&0x0F],1);
+    if((num&0x0F)<10){
+        gpio_put(cathode_port[num&0x0F],1);
+    }
 
     switch(num&0xF0){
         case 0x10:
@@ -137,6 +139,36 @@ static float pinkfilter(float in) {
     }
     return (t = 0.75 * q + 0.25 * t); 
 } 
+
+const uint8_t *flash_target_contents = (const uint8_t *) (XIP_BASE + FLASH_TARGET_OFFSET);
+
+static bool flash_write(uint8_t *write_data){
+
+    // Note that a whole number of sectors must be erased at a time.
+    flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
+//    sleep_ms(10);
+    flash_range_program(FLASH_TARGET_OFFSET, write_data, FLASH_PAGE_SIZE);
+
+    bool mismatch = false;
+    int i;
+    for (i = 0; i < FLASH_PAGE_SIZE; i++) {
+        if (write_data[i] != flash_target_contents[i]){
+            mismatch = true;
+        }
+    }
+    if (mismatch)
+        return false;
+    else
+        return true;
+}
+
+static void flash_read(uint8_t *read_data){
+    int i;
+
+    for(i=0;i<FLASH_PAGE_SIZE;i++){
+        read_data[i] = flash_target_contents[i];
+    }
+}
 
 //-----------------------------------------------------------
 // Public method
@@ -224,31 +256,66 @@ static void nixie_init(NixieConfig *conf)
     gpio_set_dir(HVEN_PIN, GPIO_OUT);
     gpio_put(HVEN_PIN,1);
 
+    //---- flash memory initialization ----
+    flash_read(flash_data.flash_byte);
+
+    if(flash_data.nixie_config.writed!=0xA5){
+        //---- variable initialization ----
+        flash_data.nixie_config.brightness = 5;
+        flash_data.nixie_config.brightness_auto = 1;
+        flash_data.nixie_config.switch_mode = crossfade;
+        for(uint8_t i=0; i<6; i++){
+            flash_data.nixie_config.num[i] = 10;            // display off
+            flash_data.nixie_config.disp_duty[i] = 100;
+            flash_data.nixie_config.next_num[i] = 0;
+        }
+        flash_data.nixie_config.switch_counter=0;
+        flash_data.nixie_config.flg_time_update=false;
+        flash_data.nixie_config.flg_change=false;
+        flash_data.nixie_config.auto_onoff=1;
+        flash_data.nixie_config.auto_off_time.hour = 22;
+        flash_data.nixie_config.auto_off_time.min = 0;
+        flash_data.nixie_config.auto_on_time.hour = 6;
+        flash_data.nixie_config.auto_on_time.min = 0;
+        flash_data.nixie_config.time_difference.hour = 9;
+        flash_data.nixie_config.time_difference.min = 0;
+        flash_data.nixie_config.gps_correction = 1;
+        flash_data.nixie_config.led_setting = 1;
+        flash_data.nixie_config.fluctuation_level = 0;    
+        flash_data.nixie_config.writed = 0xA5;
+        flash_write(flash_data.flash_byte);
+    }
+
+
     //---- variable initialization ----
-    conf->brightness = 5;
-    conf->brightness_auto = 1;
-    conf->switch_mode = crossfade;
+    conf->brightness = flash_data.nixie_config.brightness;
+    conf->brightness_auto = flash_data.nixie_config.brightness_auto;
+    conf->switch_mode = flash_data.nixie_config.switch_mode;
     for(uint8_t i=0; i<6; i++){
         conf->num[i] = 10;            // display off
         conf->disp_duty[i] = 100;
         conf->next_num[i] = 0;
     }
-    conf->switch_counter=0;
-    conf->flg_time_update=false;
-    conf->flg_change=false;
-    conf->auto_onoff=1;
-    conf->auto_off_time.hour = 22;
-    conf->auto_off_time.min = 0;
-    conf->auto_on_time.hour = 6;
-    conf->auto_on_time.min = 0;
-    conf->time_difference.hour = 9;
-    conf->time_difference.min = 0;
-    conf->gps_correction = 1;
-    conf->led_setting = 1;
-    conf->fluctuation_level = 0;
+    conf->switch_counter=flash_data.nixie_config.switch_counter;
+    conf->flg_time_update=flash_data.nixie_config.flg_time_update;
+    conf->flg_change=flash_data.nixie_config.flg_change;
+    conf->auto_onoff=flash_data.nixie_config.auto_onoff;
+    conf->auto_off_time = flash_data.nixie_config.auto_off_time;
+    conf->auto_on_time = flash_data.nixie_config.auto_on_time;
+    conf->time_difference = flash_data.nixie_config.time_difference;
+    conf->gps_correction = flash_data.nixie_config.gps_correction;
+    conf->led_setting = flash_data.nixie_config.led_setting;
+    conf->fluctuation_level = flash_data.nixie_config.fluctuation_level;
+    conf->cursor = 0;
+    conf->switch_counter = 0;
+    conf->flg_time_update = false;
+    conf->flg_change = false;
+    conf->random_start = false;
+    conf->random_count = 0;
 
     // pink-filter initialization
     init_pink();
+
 }
 
 // brightness_inc: nixie-tube brightness increment
@@ -1041,6 +1108,26 @@ static datetime_t nixie_get_adjust_time(NixieConfig *conf)
     return time;
 }
 
+//---- parameter_backup : nixie-tube configuration backup ---------------------
+void nixie_parameter_backup(NixieConfig *conf)
+{
+    flash_data.nixie_config.brightness = conf->brightness;
+    flash_data.nixie_config.brightness_auto = conf->brightness_auto;
+    flash_data.nixie_config.switch_mode = conf->switch_mode;
+    flash_data.nixie_config.switch_counter = 0;
+    flash_data.nixie_config.flg_time_update = false;
+    flash_data.nixie_config.flg_change = false;
+    flash_data.nixie_config.auto_onoff = conf->auto_onoff;
+    flash_data.nixie_config.auto_off_time = conf->auto_off_time;
+    flash_data.nixie_config.auto_on_time = conf->auto_on_time;
+    flash_data.nixie_config.time_difference = conf->time_difference;
+    flash_data.nixie_config.gps_correction = conf->gps_correction;
+    flash_data.nixie_config.led_setting = conf->led_setting;
+    flash_data.nixie_config.fluctuation_level = conf->fluctuation_level;    
+    flash_data.nixie_config.writed = 0xA5;
+    flash_write(flash_data.flash_byte);    
+}
+
 // constractor
 NixieTube new_NixieTube(NixieConfig Config)
 {
@@ -1066,6 +1153,7 @@ NixieTube new_NixieTube(NixieConfig Config)
         .get_time_difference_correction = nixie_get_time_difference_correction,
         .fluctuation_level_add = nixie_fluctuation_level_add,
         .timeadjust_inc = nixie_timeadjust_inc,
-        .get_adjust_time = nixie_get_adjust_time
+        .get_adjust_time = nixie_get_adjust_time,
+        .parameter_backup = nixie_parameter_backup
     });
 }
