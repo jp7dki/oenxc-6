@@ -16,6 +16,9 @@
 #include "hardware/adc.h"
 #include "hardware/flash.h"
 
+
+#define BLANK_TIME 800
+
 // PINK filter constant definition
 #define MAX_Z 16
 
@@ -65,9 +68,30 @@ typedef struct
 
 } NixieConfig;
 
+//---- Nixie Tube Non-volatile parameters ----------
+typedef struct
+{
+    uint8_t writed;
+    uint8_t brightness;  
+    uint8_t brightness_auto;
+    uint8_t auto_onoff;
+    datetime_t auto_off_time;
+    datetime_t auto_on_time;
+    datetime_t time_difference;
+
+    uint8_t gps_correction;
+
+    uint8_t led_setting;
+
+    uint16_t fluctuation_level;
+
+    SwitchMode switch_mode;
+} NixieConfigNvol;
+
+
 typedef union Nvol_data{
     uint8_t flash_byte[FLASH_PAGE_SIZE];
-    NixieConfig nixie_config;
+    NixieConfigNvol nixie_config;
 }NvolData;
 
 static NvolData flash_data;
@@ -120,6 +144,9 @@ struct nixietube
 
     // parameter backup
     void (*parameter_backup)(NixieConfig *conf);
+
+    // high voltage source power control
+    void (*highvol_pwr_ctrl)(NixieConfig *conf, bool swon);
 };
 
 //---- constructor -------------

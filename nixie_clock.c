@@ -1,6 +1,5 @@
 #include "nixie_clock.h"
 
-
 float z[MAX_Z];
 float k[MAX_Z];
 
@@ -146,7 +145,7 @@ static bool flash_write(uint8_t *write_data){
 
     // Note that a whole number of sectors must be erased at a time.
     flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
-//    sleep_ms(10);
+    sleep_ms(10);
     flash_range_program(FLASH_TARGET_OFFSET, write_data, FLASH_PAGE_SIZE);
 
     bool mismatch = false;
@@ -168,6 +167,90 @@ static void flash_read(uint8_t *read_data){
     for(i=0;i<FLASH_PAGE_SIZE;i++){
         read_data[i] = flash_target_contents[i];
     }
+}
+
+
+// startup_animetion: nixie-tube startup animation
+static void nixie_startup_animation1(NixieConfig *conf)
+{
+    uint16_t i,j;
+
+    for(i=0;i<6;i++){
+        conf->disp_duty[i]=0;
+        conf->num[i]=0;
+    }
+    sleep_ms(500);
+
+    for(i=0;i<100;i++){
+        for(j=0;j<6;j++){
+            conf->disp_duty[j]++;
+        }
+        sleep_ms(8);
+    }
+
+    for(i=0;i<10;i++){
+        for(j=0;j<6;j++){
+            conf->num[j]=i;
+        }
+        sleep_ms(300);
+    }
+
+    // random number -> firmware version
+    for(j=0;j<(6*40+100);j++){
+        for(i=0;i<6;i++){
+            if(j<(i*20)){
+                conf->num[i] = conf->num[i];
+            }else if(j<((i*40)+100)){
+                conf->num[i] = (uint8_t)(rand()%10)+0x30;
+            }else{
+                conf->num[i] = version[i];
+            }
+        }
+        sleep_ms(5);
+    }    
+    sleep_ms(500);
+}
+
+// startup_animetion: nixie-tube startup animation
+static void nixie_startup_animation2(NixieConfig *conf)
+{
+    uint16_t i,j;
+    uint16_t num_flash[6] = {600, 400, 200, 500, 300, 700};
+    // number all number check
+
+    for(i=0;i<6;i++){
+        conf->disp_duty[i]=0;
+        conf->num[i]=0;
+    }
+    sleep_ms(500);
+
+    for(i=0;i<6;i++){
+        conf->disp_duty[i] = 100;
+        conf->disp_duty[i] = 0;
+    }
+
+
+    for(j=0;j<3000;j++){
+        for(i=0;i<6;i++){
+
+            conf->num[i] = (uint8_t)(rand()%10)+0x30;
+            conf->disp_duty[i] = j/30;
+        }        
+        sleep_ms(3);
+    }
+
+    // random number -> firmware version
+    for(j=0;j<(6*40+100);j++){
+        for(i=0;i<6;i++){
+            if(j<((i*40)+100)){
+                conf->num[i] = (uint8_t)(rand()%10)+0x30;
+            }else{
+                conf->num[i] = version[i];
+            }
+        }
+        sleep_ms(5);
+    }    
+    sleep_ms(500);
 }
 
 //-----------------------------------------------------------
@@ -242,7 +325,7 @@ static void nixie_init(NixieConfig *conf)
 
     conf->slice_num0 = pwm_gpio_to_slice_num(VCONT_PIN);
     pwm_set_wrap(conf->slice_num0, 3000);
-    pwm_set_chan_level(conf->slice_num0, PWM_CHAN_A, 1800);
+    pwm_set_chan_level(conf->slice_num0, PWM_CHAN_A, 2200);
     pwm_set_enabled(conf->slice_num0, true);
 
     //---- ADC(Light sensor) ---------
@@ -264,14 +347,6 @@ static void nixie_init(NixieConfig *conf)
         flash_data.nixie_config.brightness = 5;
         flash_data.nixie_config.brightness_auto = 1;
         flash_data.nixie_config.switch_mode = crossfade;
-        for(uint8_t i=0; i<6; i++){
-            flash_data.nixie_config.num[i] = 10;            // display off
-            flash_data.nixie_config.disp_duty[i] = 100;
-            flash_data.nixie_config.next_num[i] = 0;
-        }
-        flash_data.nixie_config.switch_counter=0;
-        flash_data.nixie_config.flg_time_update=false;
-        flash_data.nixie_config.flg_change=false;
         flash_data.nixie_config.auto_onoff=1;
         flash_data.nixie_config.auto_off_time.hour = 22;
         flash_data.nixie_config.auto_off_time.min = 0;
@@ -296,9 +371,6 @@ static void nixie_init(NixieConfig *conf)
         conf->disp_duty[i] = 100;
         conf->next_num[i] = 0;
     }
-    conf->switch_counter=flash_data.nixie_config.switch_counter;
-    conf->flg_time_update=flash_data.nixie_config.flg_time_update;
-    conf->flg_change=flash_data.nixie_config.flg_change;
     conf->auto_onoff=flash_data.nixie_config.auto_onoff;
     conf->auto_off_time = flash_data.nixie_config.auto_off_time;
     conf->auto_on_time = flash_data.nixie_config.auto_on_time;
@@ -377,7 +449,7 @@ static void nixie_dynamic_display_task(NixieConfig *conf)
         disp_blank();
         sleep_us(20*(100-conf->disp_duty[i]));
 
-        sleep_us(150);
+        sleep_us(BLANK_TIME);
     }    
 }
 
@@ -441,7 +513,7 @@ static void nixie_dynamic_clock_task(NixieConfig *conf)
         disp_blank();
         sleep_us(20*(100-conf->disp_duty[i]));
 
-        sleep_us(150);
+        sleep_us(BLANK_TIME);
     }
 }
 
@@ -544,7 +616,7 @@ static void nixie_dynamic_setting_task(NixieConfig *conf, uint8_t setting_num)
         disp_blank();
         sleep_us(20*(100-conf->disp_duty[i]));
 
-        sleep_us(150);
+        sleep_us(BLANK_TIME);
     }    
 }
 
@@ -584,7 +656,7 @@ static void nixie_dynamic_random_task(NixieConfig *conf)
         disp_blank();
         sleep_us(20*(100-conf->disp_duty[i]));
 
-        sleep_us(150);
+        sleep_us(BLANK_TIME);
     }    
 }
 
@@ -616,7 +688,7 @@ static void nixie_dynamic_demo_task(NixieConfig *conf)
         disp_blank();
         sleep_us(20*(100-conf->disp_duty[i]));
 
-        sleep_us(150);
+        sleep_us(BLANK_TIME);
     }    
 }
 
@@ -639,7 +711,7 @@ static void nixie_dynamic_timeadjust_task(NixieConfig *conf)
         disp_blank();
         sleep_us(20*(100-conf->disp_duty[i]));
 
-        sleep_us(150);
+        sleep_us(BLANK_TIME);
     }    
 }
 
@@ -816,42 +888,49 @@ static void nixie_switch_update(NixieConfig *conf, datetime_t time)
 static void nixie_startup_animation(NixieConfig *conf)
 {
     uint16_t i,j;
+    uint32_t result = adc_read();   // random seed
+    srand(result);
     // number all number check
-    sleep_ms(500);
 
-    for(i=0;i<6;i++){
-        conf->disp_duty[i]=0;
-        conf->num[i]=0;
+    if(rand()%2 == 0){
+        nixie_startup_animation1(conf);
+    }else{
+        nixie_startup_animation2(conf);
+    }
+}
+
+//---- get_time_diffrence_correction --------------------------
+datetime_t nixie_get_time_difference_correction(NixieConfig *conf, datetime_t time)
+{
+    datetime_t t = time;
+    int8_t min, hour;
+
+    min = t.min + conf->time_difference.min;
+
+    if(min > 59){
+        t.hour++;
+        min -= 60;
     }
 
-    for(i=0;i<100;i++){
-        for(j=0;j<6;j++){
-            conf->disp_duty[j]++;
-        }
-        sleep_ms(8);
+    if(min < 0){
+        t.hour--;
+        min += 60;
     }
 
-    for(i=0;i<10;i++){
-        for(j=0;j<6;j++){
-            conf->num[j]=i;
-        }
-        sleep_ms(300);
+    hour = t.hour + conf->time_difference.hour;
+
+    if(hour > 23){
+        hour -= 24;
     }
 
-    // random number -> firmware version
-    for(j=0;j<(6*40+100);j++){
-        for(i=0;i<6;i++){
-            if(j<(i*20)){
-                conf->num[i] = conf->num[i];
-            }else if(j<((i*40)+100)){
-                conf->num[i] = (uint8_t)(rand()%10)+0x30;
-            }else{
-                conf->num[i] = version[i];
-            }
-        }
-        sleep_ms(5);
-    }    
-    sleep_ms(500);
+    if(hour < 0){
+        hour += 24;
+    }
+
+    t.hour = hour;
+    t.min = min;
+
+    return t;
 }
 
 // dispoff_animation: nixie-tube display off animation
@@ -876,6 +955,7 @@ static void nixie_dispon_animation(NixieConfig *conf)
     datetime_t t;
 
     rtc_get_datetime(&t);
+    t = nixie_get_time_difference_correction(conf, t);
 
     for(uint16_t j=0;j<(6*40+100);j++){
         for(uint16_t i=0;i<6;i++){
@@ -886,7 +966,7 @@ static void nixie_dispon_animation(NixieConfig *conf)
             }else{
                 switch(i){
                     case 0:
-                        conf->num[0] = t.sec%10;
+                        conf->num[0] = t.sec%10+1;
                         break;
                     case 1:
                         conf->num[1] = t.sec/10;
@@ -947,39 +1027,6 @@ static void nixie_time_add(NixieConfig *conf, datetime_t *time)
     }
 }
 
-//---- get_time_diffrence_correction --------------------------
-datetime_t nixie_get_time_difference_correction(NixieConfig *conf, datetime_t time)
-{
-    datetime_t t = time;
-    int8_t min, hour;
-
-    min = t.min + conf->time_difference.min;
-
-    if(min > 59){
-        t.hour++;
-        min -= 60;
-    }
-
-    if(min < 0){
-        t.hour--;
-        min += 60;
-    }
-
-    hour = t.hour + conf->time_difference.hour;
-
-    if(hour > 23){
-        hour -= 24;
-    }
-
-    if(hour < 0){
-        hour += 24;
-    }
-
-    t.hour = hour;
-    t.min = min;
-
-    return t;
-}
 
 static void nixie_fluctuation_level_add(NixieConfig *conf)
 {
@@ -1114,9 +1161,6 @@ void nixie_parameter_backup(NixieConfig *conf)
     flash_data.nixie_config.brightness = conf->brightness;
     flash_data.nixie_config.brightness_auto = conf->brightness_auto;
     flash_data.nixie_config.switch_mode = conf->switch_mode;
-    flash_data.nixie_config.switch_counter = 0;
-    flash_data.nixie_config.flg_time_update = false;
-    flash_data.nixie_config.flg_change = false;
     flash_data.nixie_config.auto_onoff = conf->auto_onoff;
     flash_data.nixie_config.auto_off_time = conf->auto_off_time;
     flash_data.nixie_config.auto_on_time = conf->auto_on_time;
@@ -1126,6 +1170,17 @@ void nixie_parameter_backup(NixieConfig *conf)
     flash_data.nixie_config.fluctuation_level = conf->fluctuation_level;    
     flash_data.nixie_config.writed = 0xA5;
     flash_write(flash_data.flash_byte);    
+}
+
+
+// ---- highvol_pwr_ctrl : high voltage source power control --------------------
+void nixie_highvol_pwr_ctrl(NixieConfig *conf, bool swon)
+{
+    if(swon){
+        gpio_put(HVEN_PIN,1);
+    }else{
+        gpio_put(HVEN_PIN,0);
+    }
 }
 
 // constractor
@@ -1154,6 +1209,7 @@ NixieTube new_NixieTube(NixieConfig Config)
         .fluctuation_level_add = nixie_fluctuation_level_add,
         .timeadjust_inc = nixie_timeadjust_inc,
         .get_adjust_time = nixie_get_adjust_time,
-        .parameter_backup = nixie_parameter_backup
+        .parameter_backup = nixie_parameter_backup,
+        .highvol_pwr_ctrl = nixie_highvol_pwr_ctrl
     });
 }

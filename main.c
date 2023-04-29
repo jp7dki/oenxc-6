@@ -44,22 +44,18 @@
 //-------------------------------------------------------
 //- Global Variable
 //-------------------------------------------------------
-uint8_t count;
+uint16_t count = 0;
 
 bool flg_time_correct=false;
 bool flg_pps_received=false;
 
 bool flg_on = true;
 
+bool flg_offtime = false;
+bool flg_ontime = false;
+
 uint16_t pps_led_counter=0;
-uint16_t blink_counter[6] = {0,0,0,0,0,0};
-uint8_t cursor;
 uint8_t setting_num=1;
-// setting parameters
-uint8_t param_off_time_hour = 7;       // default off time = 22:00
-uint8_t param_off_time_min = 16;
-uint8_t param_on_time_hour = 6;         // defualt on time = 6:00
-uint8_t param_on_time_min = 0;
 
 // task list of delay execution.
 typedef void (*func_ptr)(void);
@@ -123,16 +119,27 @@ static void timer_alarm0_irq(void) {
     rtc_get_datetime(&time);
     time = nixie_tube.get_time_difference_correction(&nixie_conf, time);
 
+    if(flg_offtime){
+        operation_mode = off_animation;
+        flg_offtime = false;
+    }
+
+    if(flg_ontime){
+        operation_mode = on_animation;
+        flg_ontime = false;
+    }
+
     // 毎分0秒に消灯・点灯の確認をする
     if((time.sec==0) && (nixie_conf.auto_onoff==1)){
         if((time.hour==nixie_conf.auto_off_time.hour) && (time.min==nixie_conf.auto_off_time.min)){
             // 自動消灯
-            operation_mode = off_animation;
+            flg_offtime = true;
         }
 
         if((time.hour==nixie_conf.auto_on_time.hour) && (time.min==nixie_conf.auto_on_time.min)){
             // 自動点灯
-            operation_mode = on_animation;
+            flg_ontime = true;
+            nixie_tube.highvol_pwr_ctrl(&nixie_conf, true);
         }
     }
 
@@ -173,13 +180,6 @@ static void timer_alerm1_irq(void) {
         }
     }
 
-    // blink
-    for(i=0;i<6;i++){
-        if(blink_counter[i]!=0){
-            blink_counter[i]--;
-        }
-    }
-
     rtc_get_datetime(&time);
     time = nixie_tube.get_time_difference_correction(&nixie_conf, time);
     nixie_tube.switch_update(&nixie_conf, time);
@@ -188,7 +188,56 @@ static void timer_alerm1_irq(void) {
     nixie_tube.brightness_update(&nixie_conf);
 }
 
+//---- on_uart_rx : GPSの受信割り込み ---------------------
+static irq_handler_t on_uart_rx(){
+    int i;
+    uint8_t ch;
 
+    // GPSの受信処理 GPRMCのみ処理する
+    while(uart_is_readable(UART_GPS)){
+        ch = uart_getc(UART_GPS);
+
+        if(gps.receive(&gps_conf, ch)){
+            if(flg_pps_received==true){
+                // RTCをリセットしておく
+                reset_block(RESETS_RESET_RTC_BITS);
+                unreset_block_wait(RESETS_RESET_RTC_BITS);
+                rtc_init();
+
+                datetime_t t = gps_conf.gps_datetime;
+
+                rtc_set_datetime(&t);
+                flg_pps_received=false;
+            }
+        }
+    }
+}
+
+//---- GPIO割り込み(1PPS) ----
+static irq_handler_t gpio_callback(uint gpio, uint32_t event){
+    datetime_t time;
+    uint8_t i;
+
+    if(nixie_conf.gps_correction==1){
+        // time_correction
+        if(flg_time_correct==false){
+            uint64_t target = timer_hw->timerawl + 999999; // interval 1s
+            timer_hw->alarm[0] = (uint32_t)target;
+            flg_time_correct=true;
+            flg_pps_received=true;
+        }
+
+        // PPS LED
+        if(operation_mode==clock_display){
+            if(nixie_conf.led_setting==1){
+                // 1PPS_LED ON (200ms)
+                gps.pps_led_on();
+                task_add(gps.pps_led_off, 20);
+            }
+        }
+    }
+
+}
 
 //---------------------------------------------------------
 //- core1 entry
@@ -246,57 +295,6 @@ void core1_entry(){
     }
 }
 
-//---- on_uart_rx : GPSの受信割り込み ---------------------
-static irq_handler_t on_uart_rx(){
-    int i;
-    uint8_t ch;
-
-    // GPSの受信処理 GPRMCのみ処理する
-    while(uart_is_readable(UART_GPS)){
-        ch = uart_getc(UART_GPS);
-
-        if(gps.receive(&gps_conf, ch)){
-            if(flg_pps_received==true){
-                // RTCをリセットしておく
-                reset_block(RESETS_RESET_RTC_BITS);
-                unreset_block_wait(RESETS_RESET_RTC_BITS);
-                rtc_init();
-
-                datetime_t t = gps_conf.gps_datetime;
-
-                rtc_set_datetime(&t);
-                flg_pps_received=false;
-            }
-        }
-    }
-}
-
-//---- GPIO割り込み(1PPS) ----
-static irq_handler_t gpio_callback(uint gpio, uint32_t event){
-    datetime_t time;
-    uint8_t i;
-
-    if(nixie_conf.gps_correction==1){
-        // time_correction
-        if(flg_time_correct==false){
-            uint64_t target = timer_hw->timerawl + 999999; // interval 1s
-            timer_hw->alarm[0] = (uint32_t)target;
-            flg_time_correct=true;
-            flg_pps_received=true;
-        }
-
-        // PPS LED
-        if(operation_mode==clock_display){
-            if(nixie_conf.led_setting==1){
-                // 1PPS_LED ON (200ms)
-                gps.pps_led_on();
-                task_add(gps.pps_led_off, 20);
-            }
-        }
-    }
-
-}
-
 //---------------------------------------------------------
 //- main function
 //---------------------------------------------------------
@@ -342,6 +340,7 @@ int main(){
             // off_animation
             nixie_tube.dispoff_animation(&nixie_conf);
             operation_mode = poweroff;
+            nixie_tube.highvol_pwr_ctrl(&nixie_conf, false);
         }
 
         if(operation_mode==on_animation){
@@ -545,7 +544,10 @@ void swa_long_push(void)
 
                 rtc_set_datetime(&t);
                 operation_mode = clock_display;
-
+        case poweroff:
+            operation_mode = clock_display;
+            nixie_tube.highvol_pwr_ctrl(&nixie_conf, true);
+            break;
         default:
             operation_mode = clock_display;
             break;
