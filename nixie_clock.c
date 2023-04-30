@@ -990,6 +990,52 @@ static void nixie_dispon_animation(NixieConfig *conf)
     }    
 }
 
+//---- nixie_anti_cathode-poisoning -------------------------
+static void nixie_time_animation(NixieConfig *conf, datetime_t time)
+{
+    
+    srand(time.month+time.day+time.hour+time.min+time.sec);
+    time.sec+=7;
+    if(time.sec>=60){
+        time.sec-=60;
+        if(++time.min>=60){
+            time.min=0;
+            if(++time.hour>=24){
+                time.hour=0;
+            }
+        }
+    }
+    for(uint16_t j=0;j<780;j++){
+        for(uint16_t i=0;i<6;i++){
+            if(j<((i*80)+300)){
+                conf->num[i] = (uint8_t)(rand()%10)+0x30;
+            }else{
+                switch(i){
+                    case 0:
+                        conf->num[i]=time.sec%10;
+                        break;
+                    case 1:
+                        conf->num[i]=time.sec/10;
+                        break;
+                    case 2:
+                        conf->num[i]=time.min%10;
+                        break;
+                    case 3:
+                        conf->num[i]=time.min/10;
+                        break;
+                    case 4:
+                        conf->num[i]=time.hour%10;
+                        break;
+                    case 5:
+                        conf->num[i]=time.hour/10;
+                        break;
+                }
+            }
+        }
+        sleep_ms(10);
+    }
+}
+
 //---- nixie_auto_ontime_add : auto-on time add sequence ---------------------
 static void nixie_time_add(NixieConfig *conf, datetime_t *time)
 {
@@ -1204,6 +1250,7 @@ NixieTube new_NixieTube(NixieConfig Config)
         .startup_animation = nixie_startup_animation,
         .dispoff_animation = nixie_dispoff_animation,
         .dispon_animation = nixie_dispon_animation,
+        .time_animation = nixie_time_animation,
         .time_add = nixie_time_add,
         .get_time_difference_correction = nixie_get_time_difference_correction,
         .fluctuation_level_add = nixie_fluctuation_level_add,

@@ -34,7 +34,6 @@
 //- Macro Define 
 //-------------------------------------------------------
 
-
 // UART0(DEBUG) 
 #define BAUD_RATE 115200
 
@@ -53,6 +52,8 @@ bool flg_on = true;
 
 bool flg_offtime = false;
 bool flg_ontime = false;
+
+bool flg_random = false;
 
 uint16_t pps_led_counter=0;
 uint8_t setting_num=1;
@@ -74,7 +75,8 @@ enum OperationMode{
     demo,
     off_animation,
     on_animation,
-    poweroff
+    poweroff,
+    time_animation
 } operation_mode;
 
 NixieTube nixie_tube;
@@ -98,10 +100,6 @@ void swb_short_push(void);
 void swb_long_push(void);
 void swc_short_push(void);
 void swc_long_push(void);
-/*
-void init_pink(void);
-float pinkfilter(float in);
-*/
 
 //-------------------------------------------------------
 //- IRQ
@@ -146,6 +144,10 @@ static void timer_alarm0_irq(void) {
     // 毎時0分0秒に時刻合わせを行う
     if((time.sec==0) && (time.min==0)){
         flg_time_correct = false;
+
+        if(operation_mode==clock_display){
+            flg_random = true;
+        }
     }
 
     if(operation_mode==clock_display){
@@ -253,6 +255,7 @@ void core1_entry(){
             case power_up_animation:
             case on_animation:
             case off_animation:
+            case time_animation:
 
                 nixie_tube.dynamic_display_task(&nixie_conf);
                 break;
@@ -347,6 +350,15 @@ int main(){
             // on_animation
             nixie_tube.dispon_animation(&nixie_conf);
             operation_mode = clock_display;
+        }
+
+        if((operation_mode==clock_display) && (flg_random==true)){
+            operation_mode = time_animation;
+            rtc_get_datetime(&time);
+            time = nixie_tube.get_time_difference_correction(&nixie_conf, time);
+            nixie_tube.time_animation(&nixie_conf, time);
+            operation_mode = clock_display;
+            flg_random=false;        
         }
 
         //---- SWA -----------------------

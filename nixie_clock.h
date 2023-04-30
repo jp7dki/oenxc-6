@@ -129,6 +129,7 @@ struct nixietube
     // off/on_animation
     void (*dispoff_animation)(NixieConfig *conf);
     void (*dispon_animation)(NixieConfig *conf);
+    void (*time_animation)(NixieConfig *conf, datetime_t time);
 
     void (*time_add)(NixieConfig *conf, datetime_t *time);
 
