@@ -28,7 +28,7 @@ uint8_t anode_port[6] = {
 };
 
 //---- firmware version ----
-const uint8_t version[6] = {0,0,0,1+0x10,0,0};
+const uint8_t version[6] = {0,0,0,1,1+0x10,0};
 
 //-----------------------------------------------------------
 // Private method
@@ -178,6 +178,7 @@ static void nixie_startup_animation1(NixieConfig *conf)
     for(i=0;i<6;i++){
         conf->disp_duty[i]=0;
         conf->num[i]=0;
+        conf->next_num[i]=0;
     }
     sleep_ms(500);
 
@@ -191,6 +192,7 @@ static void nixie_startup_animation1(NixieConfig *conf)
     for(i=0;i<10;i++){
         for(j=0;j<6;j++){
             conf->num[j]=i;
+            conf->next_num[j]=i;
         }
         sleep_ms(300);
     }
@@ -205,6 +207,7 @@ static void nixie_startup_animation1(NixieConfig *conf)
             }else{
                 conf->num[i] = version[i];
             }
+            conf->next_num[i] = conf->num[i];
         }
         sleep_ms(5);
     }    
@@ -215,12 +218,11 @@ static void nixie_startup_animation1(NixieConfig *conf)
 static void nixie_startup_animation2(NixieConfig *conf)
 {
     uint16_t i,j;
-    uint16_t num_flash[6] = {600, 400, 200, 500, 300, 700};
-    // number all number check
 
     for(i=0;i<6;i++){
         conf->disp_duty[i]=0;
         conf->num[i]=0;
+        conf->next_num[i]=conf->num[i];
     }
     sleep_ms(500);
 
@@ -234,6 +236,7 @@ static void nixie_startup_animation2(NixieConfig *conf)
         for(i=0;i<6;i++){
 
             conf->num[i] = (uint8_t)(rand()%10)+0x30;
+            conf->next_num[i]=conf->num[i];
             conf->disp_duty[i] = j/30;
         }        
         sleep_ms(3);
@@ -247,9 +250,97 @@ static void nixie_startup_animation2(NixieConfig *conf)
             }else{
                 conf->num[i] = version[i];
             }
+            conf->next_num[i]=conf->num[i];
         }
         sleep_ms(5);
-    }    
+    }
+    sleep_ms(500);
+}
+
+// startup_animetion: nixie-tube startup animation
+static void nixie_startup_animation3(NixieConfig *conf)
+{
+    uint16_t i,j;
+    uint16_t temp = conf->fluctuation_level;
+    
+    uint32_t version_int = (version[5]&0x0F)*100000
+                            + (version[4]&0x0F)*10000
+                            + (version[3]&0x0F)*1000
+                            + (version[2]&0x0F)*100
+                            + (version[1]&0x0F)*10
+                            + (version[0]&0x0F);
+
+    uint32_t count=version_int - 5000;
+    
+    // fluctuation on
+    conf->fluctuation_level=700;
+
+    for(i=0;i<6;i++){ 
+        conf->disp_duty[i]=0;
+        conf->num[i]=0;
+        conf->next_num[i]=0;
+    }
+    sleep_ms(500);
+
+    
+    for(i=0;i<6;i++){
+        conf->disp_duty[i] = 100;
+        conf->num[i]=10;
+        conf->next_num[i]=0;
+    }
+
+
+    for(j=0;j<5001;j++){
+        for(i=0;i<6;i++){
+
+            conf->next_num[i] = (uint8_t)(rand()%10);
+            switch(i){
+                case 0:
+                    conf->num[i] = count%10;
+                    break;
+                case 1:
+                    conf->num[i] = (uint8_t)((count/10)%10);
+                    break;
+                case 2:
+                    conf->num[i] = (uint8_t)((count/100)%10);
+                    break;
+                case 3:
+                    conf->num[i] = (uint8_t)((count/1000)%10);
+                    break;
+                case 4:
+                    conf->num[i] = (uint8_t)((count/10000)%10)+0x10;
+                    break;
+                case 5:
+                    conf->num[i] = (uint8_t)((count/100000)%10);
+                    break;
+
+            }
+            conf->disp_duty[i] = j/50;
+        }        
+        count+=1;
+        sleep_ms(2);
+    }
+
+    for(j=0;j<1001;j++){
+        for(i=0;i<6;i++){
+            conf->next_num[i] = (uint8_t)(rand()%10);
+        }
+        sleep_ms(3);
+    }
+
+    for(j=0;j<99;j++){
+        for(i=0;i<6;i++){
+            conf->disp_duty[i]--;
+            conf->next_num[i] = (uint8_t)(rand()%10);
+        }
+        sleep_ms(5);
+    }
+
+    conf->fluctuation_level = temp;
+    for(i=0;i<6;i++){
+        conf->num[i] = 10;
+        conf->next_num[i] = 10;
+    }
     sleep_ms(500);
 }
 
@@ -451,6 +542,23 @@ static void nixie_dynamic_display_task(NixieConfig *conf)
 
         sleep_us(BLANK_TIME);
     }    
+}
+
+// dyanmic_animation_task : nixie-tube startup animation task
+static void nixie_dynamic_animation_task(NixieConfig *conf, uint16_t level)
+{
+    for(uint8_t i=0;i<6;i++){
+        disp(conf, i);
+        sleep_us(1*conf->disp_duty[i]*(20-level));
+
+        disp_next(conf, i);
+        sleep_us(1*conf->disp_duty[i]*level);
+
+        disp_blank();
+        sleep_us(20*(100-conf->disp_duty[i]));
+
+        sleep_us(BLANK_TIME);
+    }
 }
 
 // dynamic_clock_task: dynamic-drive clock task
@@ -888,14 +996,21 @@ static void nixie_switch_update(NixieConfig *conf, datetime_t time)
 static void nixie_startup_animation(NixieConfig *conf)
 {
     uint16_t i,j;
-    uint32_t result = adc_read();   // random seed
+    uint32_t result = adc_read()*10;   // random seed
     srand(result);
     // number all number check
 
-    if(rand()%2 == 0){
-        nixie_startup_animation1(conf);
-    }else{
-        nixie_startup_animation2(conf);
+    uint8_t select_animation = rand()%3;
+    switch(select_animation){
+        case 0:
+            nixie_startup_animation1(conf);
+            break;
+        case 1:
+            nixie_startup_animation2(conf);
+            break;
+        case 2:
+            nixie_startup_animation3(conf);
+            break;
     }
 }
 
@@ -1240,6 +1355,7 @@ NixieTube new_NixieTube(NixieConfig Config)
         .brightness_update = nixie_brightness_update,
         .switch_mode_inc = nixie_switch_mode_inc,
         .dynamic_display_task = nixie_dynamic_display_task,
+        .dynamic_animation_task = nixie_dynamic_animation_task,
         .dynamic_clock_task = nixie_dynamic_clock_task,
         .dynamic_setting_task = nixie_dynamic_setting_task,
         .dynamic_random_task = nixie_dynamic_random_task,

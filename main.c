@@ -55,8 +55,11 @@ bool flg_ontime = false;
 
 bool flg_random = false;
 
+bool flg_tick = false;
+
 uint16_t pps_led_counter=0;
 uint8_t setting_num=1;
+uint8_t overlap_level=20;
 
 // task list of delay execution.
 typedef void (*func_ptr)(void);
@@ -153,6 +156,8 @@ static void timer_alarm0_irq(void) {
     if(operation_mode==clock_display){
         nixie_tube.clock_tick(&nixie_conf, time);
     }
+
+    flg_tick = true;
 }
 
 //---- timer_alarm1 : 10msごとの割り込み ----
@@ -253,6 +258,9 @@ void core1_entry(){
 
             // Power up animation
             case power_up_animation:
+                nixie_tube.dynamic_animation_task(&nixie_conf, overlap_level);
+
+                break;
             case on_animation:
             case off_animation:
             case time_animation:
@@ -333,10 +341,21 @@ int main(){
     // Power-Up-Animation
     operation_mode = power_up_animation;
     
+    overlap_level = 2;
     nixie_tube.startup_animation(&nixie_conf);
 
     // Clock Display mode
+    overlap_level = 0;
+    flg_tick=false;
+    sleep_ms(1);
     operation_mode = clock_display;
+
+    while(flg_tick==false);
+    sleep_ms(10);
+    for(i=0;i<6;i++){
+        nixie_conf.disp_duty[i]=100;
+    }
+
 
     while (1) {
         if(operation_mode==off_animation){
@@ -430,10 +449,10 @@ void hardware_init(void)
         .year = 2023,
         .month = 03,
         .day = 18,
-        .dotw = 1,
-        .hour = 12,
-        .min = 34,
-        .sec = 56
+        .dotw = 0,
+        .hour = 0,
+        .min = 0,
+        .sec = 0
     };
 
     rtc_init();

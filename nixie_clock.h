@@ -112,6 +112,7 @@ struct nixietube
 
     // dynamic drive task
     void (*dynamic_display_task)(NixieConfig *conf);
+    void (*dynamic_animation_task)(NixieConfig *conf, uint8_t level);
     void (*dynamic_clock_task)(NixieConfig *conf);
     void (*dynamic_setting_task)(NixieConfig *conf, uint8_t setting_num);
     void (*dynamic_random_task)(NixieConfig *conf);
