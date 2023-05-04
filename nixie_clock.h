@@ -105,6 +105,7 @@ struct nixietube
 
     //---- initialization -----------
     void (*init)(NixieConfig *conf);
+    void (*flash_init)(NixieConfig *conf);
 
     void (*brightness_inc)(NixieConfig *conf);
     void (*brightness_update)(NixieConfig *conf);

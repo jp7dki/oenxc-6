@@ -326,9 +326,12 @@ int main(){
 
     bi_decl(bi_program_description("This is a test program for nixie6."));
 
-    nixie_tube = new_NixieTube(nixie_conf);
-    nixie_tube.init(&nixie_conf);
     hardware_init();
+    nixie_tube = new_NixieTube(nixie_conf);
+    if(!gpio_get(SWA_PIN)){
+        nixie_tube.flash_init(&nixie_conf);
+    }
+    nixie_tube.init(&nixie_conf);
 
     gps = new_Gps(gps_conf);
     gps.init(&gps_conf, on_uart_rx, gpio_callback);

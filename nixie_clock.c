@@ -481,6 +481,27 @@ static void nixie_init(NixieConfig *conf)
 
 }
 
+// flash_init : flash memory force reset
+static void nixie_flash_init(NixieConfig *conf)
+{
+    //---- variable initialization ----
+    flash_data.nixie_config.brightness = 5;
+    flash_data.nixie_config.brightness_auto = 1;
+    flash_data.nixie_config.switch_mode = crossfade;
+    flash_data.nixie_config.auto_onoff=1;
+    flash_data.nixie_config.auto_off_time.hour = 22;
+    flash_data.nixie_config.auto_off_time.min = 0;
+    flash_data.nixie_config.auto_on_time.hour = 6;
+    flash_data.nixie_config.auto_on_time.min = 0;
+    flash_data.nixie_config.time_difference.hour = 9;
+    flash_data.nixie_config.time_difference.min = 0;
+    flash_data.nixie_config.gps_correction = 1;
+    flash_data.nixie_config.led_setting = 1;
+    flash_data.nixie_config.fluctuation_level = 0;    
+    flash_data.nixie_config.writed = 0xA5;
+    flash_write(flash_data.flash_byte);
+}
+
 // brightness_inc: nixie-tube brightness increment
 static void nixie_brightness_inc(NixieConfig *conf)
 {
@@ -1350,6 +1371,7 @@ NixieTube new_NixieTube(NixieConfig Config)
     return ((NixieTube){
         .conf = Config,
         .init = nixie_init,
+        .flash_init = nixie_flash_init,
         
         .brightness_inc = nixie_brightness_inc,
         .brightness_update = nixie_brightness_update,
